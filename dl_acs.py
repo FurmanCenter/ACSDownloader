@@ -1,10 +1,34 @@
+import os
 import click
 
 
 class CensusDownloader(object):
-	def __init__(self):
-		"""Class to hold downloader context."""
-		pass
+	"""Class to hold downloader context.
+
+	"""
+	
+	def __init__(self, outdir,
+				baseurl, maxyear,
+				years, durations, states):
+		"""Init method"""
+
+		self.outdir = outdir
+
+	@property
+	def outdir(self):
+	    return self._outdir
+
+	@outdir.setter
+	def outdir(self, outdir):
+		# Make sure directory exists. If not, create it.
+		try:
+			os.makedirs(outdir)
+		except OSError:
+			# If directory already exists, fine
+			# otherwise, a real error, so raise it
+			if not os.path.isdir(outdir):
+				raise
+		self._outdir = outdir
 
 @click.group()
 def dl_acs():
