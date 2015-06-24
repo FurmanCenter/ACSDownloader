@@ -20,7 +20,10 @@ def get_links(url, filter=None):
 			a list of the output from the filter.
 
 	>>> get_links('http://www2.census.gov/acs2005/summaryfile/', filter=lambda h: h if not h.find('/') >= 0 else None)
-	['ACS_2005_SF_Tech_Doc.pdf', 'ACS_SF_Worked_Example.pdf', 'README.pdf']
+	[u'ACS_2005_SF_Tech_Doc.pdf', u'ACS_SF_Worked_Example.pdf', u'README.pdf']
+	
+	>>> len(get_links('http://www2.census.gov/acs2005/summaryfile/'))
+	58
 
 	"""
     r = requests.get(url)
@@ -28,8 +31,10 @@ def get_links(url, filter=None):
     links = soup.select('td a') # get all links in a table cell
 
     if filter is not None:
-    	return [filter(link['href']) for link in links]
+    	# If filter is set, return the good (non "None") hrefs from the filter
+    	return [goodlink for goodlink in (filter(link['href']) for link in links) if goodlink is not None]
     else:
+    	# If no filter is set, just return the hrefs
     	return [link['href'] for link in links]
 
 
