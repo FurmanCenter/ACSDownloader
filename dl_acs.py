@@ -19,6 +19,9 @@ def get_links(url, filter=None):
 			a list of the links themselves, as strings. If a filter is provided,
 			a list of the output from the filter.
 
+	>>> get_links('http://www2.census.gov/acs2005/summaryfile/', filter=lambda h: h if not h.find('/') >= 0 else None)
+	['ACS_2005_SF_Tech_Doc.pdf', 'ACS_SF_Worked_Example.pdf', 'README.pdf']
+
 	"""
     r = requests.get(url)
     soup = bs(r.text)
@@ -28,7 +31,7 @@ def get_links(url, filter=None):
     	return [filter(link['href']) for link in links]
     else:
     	return [link['href'] for link in links]
-    
+
 
 class CensusDownloader(object):
 	"""Class to hold downloader context.
