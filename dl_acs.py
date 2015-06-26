@@ -3,67 +3,68 @@ import requests
 from bs4 import BeautifulSoup as bs
 import click
 import re
+import us
 
 
 def get_links(url, filter=None):
     """Return (filtered) links listed in an HTML table at a given URL.
 
     Args:
-    	url: URL where listing is located
-		link_filter (Optional[Callable[str, obj]]): Function to filter links.
-			Should take the link as an argument and return ``None`` if link should
-			not be added to list and an object (usually a dict or str) if it should.
-			The object returned will be added to the list of links as is.
+        url: URL where listing is located
+        link_filter (Optional[Callable[str, obj]]): Function to filter links.
+            Should take the link as an argument and return ``None`` if link should
+            not be added to list and an object (usually a dict or str) if it should.
+            The object returned will be added to the list of links as is.
 
-	Returns:
-		List: A list of (possibly filtered) links. If no filter is provided, simply
-			a list of the links themselves, as strings. If a filter is provided,
-			a list of the output from the filter.
+    Returns:
+        List: A list of (possibly filtered) links. If no filter is provided, simply
+            a list of the links themselves, as strings. If a filter is provided,
+            a list of the output from the filter.
 
-	>>> get_links('http://www2.census.gov/acs2005/summaryfile/', filter=lambda h: h if not h.find('/') >= 0 else None)
-	[u'ACS_2005_SF_Tech_Doc.pdf', u'ACS_SF_Worked_Example.pdf', u'README.pdf']
-	
-	>>> len(get_links('http://www2.census.gov/acs2005/summaryfile/'))
-	58
+    >>> get_links('http://www2.census.gov/acs2005/summaryfile/', filter=lambda h: h if not h.find('/') >= 0 else None)
+    [u'ACS_2005_SF_Tech_Doc.pdf', u'ACS_SF_Worked_Example.pdf', u'README.pdf']
+    
+    >>> len(get_links('http://www2.census.gov/acs2005/summaryfile/'))
+    58
 
-	"""
+    """
     r = requests.get(url)
     soup = bs(r.text)
     links = soup.select('td a') # get all links in a table cell
 
     if filter is not None:
-    	# If filter is set, return the good (non "None") hrefs from the filter
-    	return [goodlink for goodlink in (filter(link['href']) for link in links) if goodlink is not None]
+        # If filter is set, return the good (non "None") hrefs from the filter
+        return [goodlink for goodlink in (filter(link['href']) for link in links) if goodlink is not None]
     else:
-    	# If no filter is set, just return the hrefs
-    	return [link['href'] for link in links]
+        # If no filter is set, just return the hrefs
+        return [link['href'] for link in links]
 
 def link_filter(href):
-	"""Clean and filter link href.
+    """Clean and filter link href.
 
-	Args:
-		href (str): the href component of a link
+    Args:
+        href (str): the href component of a link
 
-	Returns:
-		If href matches correct format, returns a dict with relevant
-		components of href (and whole string).
+    Returns:
+        If href matches correct format, returns a dict with relevant
+        components of href (and whole string).
 
-		If href doesn't match, returns None.
+        If href doesn't match, returns None.
 
-	>>> self.link_filter('Alaska/')
-	u'Alaska'
+    >>> link_filter('Alaska/')
+    None
 
-	>>> self.link_filter('/acs2005/')
-	None
-	"""
-	clean_href = href[0:-1] # Remove trailing slash from links
-	# This regex gets the year and duration from the name of the folder on the Census server
-	acs_re = re.compile(r'acs(?P<y ear>[0-9]{4})(?:_(?P<dur>[135])yr)?$')
-	m = acs_re.match(clean_href)
-	if m is not None and int(m.group(1)) >= 2005: # only want folders for ACS from 2005 or later
-		return {'dir': clean_href, 'match': m}
-	else:
-		return None
+    >>> link_filter('/acs2005/')
+    {'dir': '/acs2005'}
+    """
+    clean_href = href[0:-1] # Remove trailing slash from links
+    # This regex gets the year and duration from the name of the folder on the Census server
+    acs_re = re.compile(r'acs(?P<year>[0-9]{4})(?:_(?P<dur>[135])yr)?$')
+    m = acs_re.match(clean_href)
+    if m is not None and int(m.group(1)) >= 2005: # only want folders for ACS from 2005 or later
+        return {'dir': clean_href, 'match': m}
+    else:
+        return None
 
 def get_state_dir(st, is2005=False):
     """Given a 2-char abbreviation, return the state directory.
@@ -73,113 +74,202 @@ def get_state_dir(st, is2005=False):
     they put a "0" in front of the name, to make sure it's sorted to the top.
 
     Args:
-    	st: 2-character abbreviation
-    	is2005 (Optional): whether year is 2005
+        st: 2-character abbreviation
+        is2005 (Optional): whether year is 2005
 
     Returns:
-    	A string with the state's directory name
+        A string with the state's directory name
+
+    >>> get_state_dir('ny')
+    u'NewYork'
+
+    >>> get_state_dir('us')
+    u'UnitedStates'
+
+    >>> get_state_dir('us', is2005=True)
+    u'0UnitedStates'
+
+    >>> get_state_dir('qq')
+
     """
     state = us.states.lookup(st)
     if state is None:
         if st.upper() == "US":
             if not is2005:
-                return "UnitedStates"
+                return u"UnitedStates"
             else:
-                return "0UnitedStates"
+                return u"0UnitedStates"
     else:
         return state.name.replace(" ","")
 
+
+######################################
+#### GET REMOTE FILE LISTS        ####
+######################################
 def get_files(url, year, dur, states, mode="SF"):
-	"""Get list of files to download from server.
+    """Get list of files to download from server.
 
-	"""
-	if mode=="PUMS":
-		return [{'url': url,
-					'file': 'unix_%s%s.zip' % (rectype, st),
-					'state': st}
-					for rectype in ('h', 'p')
-				for st in states]
-	else: # Summary File has weird standards
-		# Start with empty list of files
-		files = []
-		if year==2009 and dur==1: # weird exception
-            subdir = 'Entire_States/' 
-        elif year !=2009 and dur == 1:
-            # The subdirectory starts with the year covered.
-            subdir = '%s_ACSSF_By_State_All_Tables/' % year
+    The returned list is actually a list of dicts, with entries for the
+    folder portion of the url, the actual file name, and then the state
+    abbreviation.
+
+    """
+    if mode=="PUMS":
+        # For PUMS, just return the list of person and household files
+        return [{'url': url,
+                    'file': 'unix_%s%s.zip' % (rectype, st),
+                    'state': st}
+                    for rectype in ('h', 'p')
+                for st in states]
+
+    else: # Summary File has weird standards
+        return get_files_new_SF(url, year, dur, states)
+
+
+def get_files_new_SF(url, year, dur, states):
+    """Get remote files using new SF standard.
+
+    Starting in 2009, the Census is more consistent with the structure of
+    the directories. There is one subdirectory within summaryfile/ that
+    contains all the state files, each of which is just a single zipped file.
+    Each state does NOT, thus, have a subdirectory itself.
+
+    >>> get_files_new_SF('http://www2.census.gov/acs2009_1yr/summaryfile', 2009, 1, ['ny'])
+    None
+
+    """
+    # Start with empty list of files
+    files = []
+
+    # Set subdirectory based on year and duration
+    if year==2009 and dur==1: # weird exception
+        subdir = 'Entire_States/' 
+    elif year !=2009 and dur == 1: # single-year estimates except 2009
+        # The subdirectory starts with the year covered.
+        subdir = '%s_ACSSF_By_State_All_Tables/' % year
+    else: # Multiyear estimates
+        # The subdirectory starts with the range of years covered
+        start_yr = year - dur + 1
+        subdir = '%s-%s_ACSSF_By_State_All_Tables/' % (start_yr, year)
+
+    # Return list of files in subdirectory for each state
+    # Only want zip files
+    for st in states:
+        st_links = get_links(url + subdir)
+        for link in st_links: 
+            if re.search(r'%s.*\.zip' % get_state_dir(st), link):
+                files.append({'url': st_dir, 'file': link, 'state': st})
+    return files
+
+
+def get_files_old_SF(url, year, dur, states):
+    """Get remote file list using old SF standard.
+
+    The Census, in its infinite wisdom, has very inconsistent naming conventions,
+    but the greatest difference is that, before 2009, the summaryfile/ directory
+    contains a subdirectory for each state, and within those subdirectories
+    there is a listing of all the files as well as a zip file containing all
+    those files. Thus the format is generally (with some exceptions):
+    
+    acsYEAR_DURyr/summaryfile/StateName/all_st.zip
+    
+    Where StateName is what is returned by get_state_dir(), basically
+    the state name in camel case and without spaces, and st is the two-letter
+    abbreviation (lowercase) for that state (or "us"). In 2005 and 2006, the outermost
+    directory is just acsYEAR, without any duration (and those are both 1-year files).
+    In 2006, moreover, the name of the actual zip files is different:
+        st_all_2006.zip
+
+
+    """
+    # Start with empty list of files
+    files = []
+
+    for st in states:
+        is2005 = (year==2005)
+        st_dir = url + get_state_dir(st, is2005)
+        st_links = get_links(st_dir)
+        
+        if is2005:
+            st_file = "all_%s.zip" % st
+            geo_file = "%sgeo.2005-1yr" % st
+        elif "all_%s.zip" % st in st_links:
+            st_file = "all_%s.zip" % st
+            geo_file = "g%s%s%s.txt" % (year, dur, st)
+        elif "%s_all_2006.zip" % st in st_links:
+            st_file =  "%s_all_2006.zip" % st
+            geo_file = "g%s%s%s.txt" % (year, dur, st)
         else:
-            # The subdirectory starts with the range of years covered
-            start_yr = year - dur + 1
-            subdir = '%s-%s_ACSSF_By_State_All_Tables/' % (start_yr, year)
+            print "NO FILE: %s" % st, st_dir
+            break
+        
+        files.append({'url': st_dir + '/', 'file': st_file, 'state': st})
+        files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
+    return files
 
-        for st in states:
-        	st_links = get_links(url + subdir, 
-        						filter=lambda link:
-        							link 
-        								if re.search(r'%s.*\.zip' % get_state_dir(st), link)
-        								else None
+
 
 
 
 
 class CensusDownloader(object):
-	"""Class to hold downloader context.
+    """Class to hold downloader context.
 
-	"""
-	
-	def __init__(self, outdir,
-				baseurl='http://www2.census.gov/', maxyear,
-				years, durations, states):
-		"""Init method"""
-		self.baseurl = baseurl
-		self.outdir = outdir
-		self.link_filter = link_filter
+    """
+    
+    def __init__(self, outdir,
+                baseurl='http://www2.census.gov/', mode="SF"):
+        """Init method"""
+        self.baseurl = baseurl
+        self.outdir = outdir
+        self.link_filter = link_filter
+        self.mode = mode
 
-	@property
-	def outdir(self):
-	    return self._outdir
+    @property
+    def outdir(self):
+        return self._outdir
 
-	@outdir.setter
-	def outdir(self, outdir):
-		# Make sure directory exists. If not, create it.
-		try:
-			os.makedirs(outdir)
-		except OSError:
-			# If directory already exists, fine
-			# otherwise, a real error, so raise it
-			if not os.path.isdir(outdir):
-				raise
-		self._outdir = outdir
+    @outdir.setter
+    def outdir(self, outdir):
+        # Make sure directory exists. If not, create it.
+        try:
+            os.makedirs(outdir)
+        except OSError:
+            # If directory already exists, fine
+            # otherwise, a real error, so raise it
+            if not os.path.isdir(outdir):
+                raise
+        self._outdir = outdir
 
-	@property
-	def link_filter(self):
-		return self._link_filter
+    @property
+    def link_filter(self):
+        return self._link_filter
 
-	@property
-	def remote_files(self):
-		if self._remote_files is None:
-			folders = get_links(self.baseurl, self.link_filter)
-
-
-	    return self._remote_files
+    @property
+    def remote_files(self):
+        if self._remote_files is None:
+            folders = get_links(self.baseurl, self.link_filter)
 
 
-	@property
-	def dest_files(self):
-	    return self._dest_files
+        return self._remote_files
+
+
+    @property
+    def dest_files(self):
+        return self._dest_files
 
 
 
 
-	def download(self):
-		"""Download remote files to destination.
+    def download(self):
+        """Download remote files to destination.
 
-		"""
-		for f in self.remote_files:
-			download(url, path)
+        """
+        for f in self.remote_files:
+            download(url, path)
 
-	
-	
+    
+    
 
 @click.group()
 def dl_acs():
@@ -188,10 +278,10 @@ def dl_acs():
 
 @dl_acs.command()
 def sf():
-	"""Download Summary File datafiles"""
-	click.echo("Downloading SF")
+    """Download Summary File datafiles"""
+    click.echo("Downloading SF")
 
 @dl_acs.command()
 def pums():
-	"""Download Public Use Microdata Sample datafiles"""
-	click.echo("Downloading PUMS")
+    """Download Public Use Microdata Sample datafiles"""
+    click.echo("Downloading PUMS")
