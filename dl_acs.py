@@ -66,8 +66,45 @@ def link_filter(href):
     else:
         return None
 
-def get_state_dir(st, is2005=False):
-    """Given a 2-char abbreviation, return the state directory.
+def acs_folder(year, dur, rooturl='http://www2.census.gov/'):
+    """Return the folder on the server for an ACS year and duration.
+
+    """
+    if year < 2007:
+        return rooturl + 'acs{0}/'.format(year)
+    else:
+        return rooturl + 'acs{0}_{1}yr/'.format(year, dur)
+
+def state_folder(year, dur, st, mode='SF', rooturl='http://www2.census.gov/'):
+    """Return the folder on the server for an ACS year, duration, and state.
+
+    A folder consists of the root URL, plus the ACS folder for a year/
+    duration, plus some standard subdirectories, and then possibly a state
+    subdirectory.
+
+
+    """
+    if year < 2007:
+        folder = rooturl + 'acs{0}/'.format(year)
+    else:
+        folder = rooturl + 'acs{0}_{1}yr/'.format(year, dur)
+
+    # For PUMS, all same subfolder
+    if mode=="PUMS":
+        return folder + 'pums/'
+
+    # Otherwise:
+    
+
+
+
+
+
+def state_filestub(st, is2005=False):
+    """Return the Census file stub (directory or filename) for a state.
+
+    File stubs refer to a string that the Census uses both as a directory
+    and as the filename (not including file extension).
 
     The Census standard is the full state name, camel case, spaces
     removed. This generally is true for "United States" too, but in 2005
@@ -80,25 +117,26 @@ def get_state_dir(st, is2005=False):
     Returns:
         A string with the state's directory name
 
-    >>> get_state_dir('ny')
+    >>> state_filestub('ny')
     u'NewYork'
 
-    >>> get_state_dir('us')
+    >>> state_filestub('us')
     u'UnitedStates'
 
-    >>> get_state_dir('us', is2005=True)
+    >>> state_filestub('us', is2005=True)
     u'0UnitedStates'
 
-    >>> get_state_dir('qq')
-
+    >>> state_filestub('qq')
+    Exception
+    ...
     """
     state = us.states.lookup(st)
     if state is None:
         if st.upper() == "US":
-            if not is2005:
-                return u"UnitedStates"
-            else:
+            if is2005:
                 return u"0UnitedStates"
+            else:
+                return u"UnitedStates"
     else:
         return state.name.replace(" ","")
 
@@ -106,12 +144,65 @@ def get_state_dir(st, is2005=False):
 ######################################
 #### GET REMOTE FILE LISTS        ####
 ######################################
-def get_files(url, year, dur, states, mode="SF"):
+def get_acs_files(year, dur, states, mode="SF", rooturl='http://www2.census.gov/'):
     """Get list of files to download from server.
 
     The returned list is actually a list of dicts, with entries for the
     folder portion of the url, the actual file name, and then the state
     abbreviation.
+
+    Args:
+        year: the ACS year (the last year for multiyear estimates)
+        dur: the ACS multiyear duration (1, 3, or 5)
+        states (List[str]): a list of 2-letter state abbreviations (strings)
+        mode (Optional): summary file ("SF") or PUMS ("PUMS"). Defaults to "SF"
+        rooturl (Optional): the root URL. Defaults to 'http://www2.census.gov/'
+
+    Returns:
+        A list of dicts, where each dict represents a single file and has:
+            'folder': the URL of the folder containing the file
+            'file': the file name, including extension
+            'state': the 2-letter abbreviation of the state
+
+    Examples:
+        In 2009 and after, the summary file is pretty standard
+
+        >>> import pprint
+        >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'], mode='SF')
+        ... #
+        [{'folder': u'http://www2.census.gov/acs2009_1yr/summaryfile/Entire_States/',
+            'file': u'NewYork.zip', 'state': 'NY'},
+        {'folder': u'http://www2.census.gov/acs2009_1yr/summaryfile/Entire_States/',
+            'file': u'UnitedStates.zip', 'state': 'US'}]
+
+
+        In 2005, the US folder has a "0" at the beginning. Note the different names
+        for the files, as well as state-specific folders on the server.
+
+        >>> get_acs_files(year=2005, dur=1, states=['MA', 'US'], mode='SF')
+        ... #
+        [{'folder': u'http://www2.census.gov/acs2005/summaryfile/Massachusetts/',
+            'file': u'all_ma.zip', 'state': 'MA'},
+        {'folder': u'http://www2.census.gov/acs2005/summaryfile/0UnitedStates/',
+            'file': u'all_us.zip', 'state': 'US'}]
+
+
+        In 2006, the file names are different.
+        >>> get_acs_files(year=2006, dur=1, states=['NJ', 'US'] mode='SF')
+        [{'folder': u'http://www2.census.gov/acs2006/summaryfile/NewJersey/',
+            'file': u'nj_all_2006.zip', 'state': 'NJ'},
+        {'folder': u'http://www2.census.gov/acs2006/summaryfile/UnitedStates/',
+            'file': u'us_all_2006.zip', 'state': 'US'}]
+
+        Multiyear estimates example
+        >>> get_acs_files(year=2013, dur=5, states=['NY', 'US'] mode='SF')
+        None
+
+        PUMS example.
+        >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'] mode='PUMS')
+        None
+
+
 
     """
     if mode=="PUMS":
@@ -123,6 +214,7 @@ def get_files(url, year, dur, states, mode="SF"):
                 for st in states]
 
     else: # Summary File has weird standards
+        # Get state directory from year, dur, state
         return get_files_new_SF(url, year, dur, states)
 
 
