@@ -6,6 +6,8 @@ setup(
 	py_modules=['dl_acs'],
 	install_requires=[
 		'Click',
+		'requests',
+		'beautifulsoup4'
 	],
 	entry_points='''
 		[console_scripts]
