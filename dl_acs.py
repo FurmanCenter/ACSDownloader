@@ -88,14 +88,24 @@ def acs_year_dur_filter(href, years=None, durs=None):
     # else:
     #     print "NO MATCH"
     # only want folders for ACS from 2005 or later
-    if (m is not None and 
-        int(m.group('year')) >= 2005 and 
-        (years is None or (int(m.group('year')) in years)) and
-        (durs is None or (int(m.group('dur')) in durs))):
-        return {'dir': m.group('dir'),
+    if m is not None and int(m.group('year')) >= 2005:
+        if m.group('year') is not None:
+            year = int(m.group('year'))
+
+        if m.group('dur') is not None:
+            dur = int(m.group('dur'))
+        else:
+            dur = 1
+
+         # When duration not specified, it's 1
+        if ((years is None or year in years) and
+            (durs is None or dur in durs)):
+            return {'dir': m.group('dir'),
                 'href': m.group('href'),
                 'year': m.group('year'),
                 'dur': m.group('dur')}
+        else:
+            return None
     else:
         return None
 
