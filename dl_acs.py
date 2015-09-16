@@ -40,8 +40,8 @@ def get_links(url, filter=None):
         return [link['href'] for link in links]
 
 
-def acs_link_filter(href):
-    """Clean and filter link href.
+def acs_year_dur_filter(href):
+    """Clean and filter link href for ACS links.
 
     Args:
         href (str): the href component of a link
@@ -52,18 +52,18 @@ def acs_link_filter(href):
 
         If href doesn't match, returns None.
 
-    >>> acs_link_filter('Alaska/')
+    >>> acs_year_dur_filter('Alaska/')
     None
 
-    >>> acs_link_filter('/acs2005/')
+    >>> acs_year_dur_filter('/acs2005/')
     {'dir': '/acs2005'}
     """
     #clean_href = href[0:-1] # Remove trailing slash from links
     # This regex gets the year and duration from the name of the folder on the Census server
-    acs_re = re.compile(r'acs(?P<year>[0-9]{4})(?:_(?P<dur>[135])yr)?')
-    m = acs_re.search(clean_href)
-    if m is not None and int(m.group(1)) >= 2005: # only want folders for ACS from 2005 or later
-        return {'dir': clean_href, 'match': m}
+    acs_re = re.compile(r'(?P<href>.*acs(?P<year>[0-9]{4})(?:_(?P<dur>[135])yr)?)(?:/?$)')
+    m = acs_re.search(href)
+    if m is not None and int(m.group('year')) >= 2005: # only want folders for ACS from 2005 or later
+        return {'dir': m.group('href'), 'match': m}
     else:
         return None
 
