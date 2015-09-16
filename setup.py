@@ -5,9 +5,10 @@ setup(
 	version='0.1',
 	py_modules=['dl_acs'],
 	install_requires=[
-		'Click',
+		'click',
 		'requests',
-		'beautifulsoup4'
+		'beautifulsoup4',
+		'us'
 	],
 	entry_points='''
 		[console_scripts]

@@ -188,18 +188,18 @@ def get_acs_files(year, dur, states, mode="SF", rooturl='http://www2.census.gov/
 
 
         In 2006, the file names are different.
-        >>> get_acs_files(year=2006, dur=1, states=['NJ', 'US'] mode='SF')
+        >>> get_acs_files(year=2006, dur=1, states=['NJ', 'US'], mode='SF')
         [{'folder': u'http://www2.census.gov/acs2006/summaryfile/NewJersey/',
             'file': u'nj_all_2006.zip', 'state': 'NJ'},
         {'folder': u'http://www2.census.gov/acs2006/summaryfile/UnitedStates/',
             'file': u'us_all_2006.zip', 'state': 'US'}]
 
         Multiyear estimates example
-        >>> get_acs_files(year=2013, dur=5, states=['NY', 'US'] mode='SF')
+        >>> get_acs_files(year=2013, dur=5, states=['NY', 'US'], mode='SF')
         None
 
         PUMS example.
-        >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'] mode='PUMS')
+        >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'], mode='PUMS')
         None
 
 
@@ -369,9 +369,15 @@ def dl_acs():
     click.echo()
 
 @dl_acs.command()
-def sf():
+@click.option('--baseurl', default='http://www2.census.gov/', help="Census root URL")
+@click.option('--years', '-y', type=(click.INT, click.INT))
+#@click.argument('outdir')
+def sf(baseurl, years):
     """Download Summary File datafiles"""
-    click.echo("Downloading SF")
+    click.echo("Downloading SF %s" % years)
+
+    mode = "SF"
+    #get_files_new_SF(url, year, dur, states)
 
 @dl_acs.command()
 def pums():
