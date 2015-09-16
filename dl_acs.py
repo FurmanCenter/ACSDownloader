@@ -4,7 +4,7 @@ from bs4 import BeautifulSoup as bs
 import click
 import re
 import us
-
+import logging
 
 def get_links(url, filter=None):
     """Return (filtered) links listed in an HTML table at a given URL.
@@ -329,68 +329,81 @@ class CensusDownloader(object):
 
     """
 
-    def __init__(self, outdir,
-                 baseurl='http://www2.census.gov/', mode="SF"):
+    def __init__(self, baseurl, 
+                    years, durations, states):
         """Init method"""
         self.baseurl = baseurl
-        self.outdir = outdir
-        self.link_filter = link_filter
-        self.mode = mode
+        self.years = years
+        self.durations = durations
+        self.states = states
 
-    @property
-    def outdir(self):
-        return self._outdir
+        #self.debug = debug
+        #self.verbose = verbose
+        #self.outdir = outdir
+        #self.link_filter = link_filter
+        #self.mode = mode
 
-    @outdir.setter
-    def outdir(self, outdir):
-        # Make sure directory exists. If not, create it.
-        try:
-            os.makedirs(outdir)
-        except OSError:
-            # If directory already exists, fine
-            # otherwise, a real error, so raise it
-            if not os.path.isdir(outdir):
-                raise
-        self._outdir = outdir
+    # @property
+    # def outdir(self):
+    #     return self._outdir
 
-    @property
-    def link_filter(self):
-        return self._link_filter
+    # @outdir.setter
+    # def outdir(self, outdir):
+    #     # Make sure directory exists. If not, create it.
+    #     try:
+    #         os.makedirs(outdir)
+    #     except OSError:
+    #         # If directory already exists, fine
+    #         # otherwise, a real error, so raise it
+    #         if not os.path.isdir(outdir):
+    #             raise
+    #     self._outdir = outdir
 
-    @property
-    def remote_files(self):
-        if self._remote_files is None:
-            folders = get_links(self.baseurl, self.link_filter)
+    # @property
+    # def link_filter(self):
+    #     return self._link_filter
 
-        return self._remote_files
+    # @property
+    # def remote_files(self):
+    #     if self._remote_files is None:
+    #         folders = get_links(self.baseurl, self.link_filter)
 
-    @property
-    def dest_files(self):
-        return self._dest_files
+    #     return self._remote_files
 
-    def download(self):
-        """Download remote files to destination.
+    # @property
+    # def dest_files(self):
+    #     return self._dest_files
 
-        """
-        for f in self.remote_files:
-            download(url, path)
+    # def download(self):
+    #     """Download remote files to destination.
+
+    #     """
+    #     for f in self.remote_files:
+    #         download(url, path)
 
 
 @click.group()
 @click.option('--debug/--no-debug', default = False)
 @click.option('--verbose/--no-verbose', '-v/-no-v', default=False)
-@click.option('--baseurl',
-              default='http://www2.census.gov/',
-              help="Census root URL")
-@click.option('--startyear', '-s', type=click.INT, prompt=True)
-@click.option('--endyear', '-e', type=click.INT, prompt=True)
-@click.option('--durs', '-d', type=click.Choice(['1', '3', '5']), multiple=True, prompt=True)
+@click.option('--log', '-l', help="Log to file path", type=click.Path(writable=True))
+#@click.pass_context
+def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, debug, verbose):
+    """Main ACS Download comand"""
+    # Set up CensusDownloader object
+    # click.echo(ctx)
+    # years = range(startyear, endyear+1)
+    # durations = (str(dur) for dur in durs)
+    if log is not None:
+        logging.basicConfig(filename=log, filemode='w')
+        
+    if debug:
+        logging.basicConfig(level=logging.DEBUG)
+    elif verbose:
+        logging.basicConfig(level=logging.INFO)
+    else:
+        logging.basicConfig(level=logging.WARNING)
 
-@click.argument('states', default='us')
-@click.pass_context
-def dl_acs(ctx, debug, verbose):
-    """Example script."""
-    ctx = { 'debug': debug }
+    #ctx.obj = CensusDownloader(baseurl,years, durations, states)
     click.echo("Debugger on" and debug or "")
 
 
@@ -398,19 +411,31 @@ def dl_acs(ctx, debug, verbose):
 #@click.option('--years', '-y', nargs=2, type=click.INT, multiple=True)
 #@click.option('--states', '-s')
 #@click.argument('outdir')
-@click.pass_context
-def sf(ctx, baseurl, startyear, endyear, durs, states):
+
+@click.option('--baseurl',
+              default='http://www2.census.gov/',
+              help="Census root URL")
+@click.option('--startyear', '-s', type=click.INT, prompt=True)
+@click.option('--endyear', '-e', type=click.INT, prompt=True)
+@click.option('--durs', '-d', type=click.Choice(['1', '3', '5']), multiple=True, prompt=True)
+@click.argument('states', default='us')
+#@click.pass_context
+def sf(states, baseurl, startyear, endyear, durs):
     """Download Summary File datafiles"""
     click.echo("Downloading SF")
-    click.echo([startyear, endyear, durs, states])
+    #logger = logging.getLogger()
+    logging.info("INFO")
+    logging.debug("DEBUG")
+    logging.warning("WARNING")
+    #click.echo(ctx.years)
 
-    years = range(startyear, endyear+1)
-    durations = (str(dur) for dur in durs)
+    # years = range(startyear, endyear+1)
+    # durations = (str(dur) for dur in durs)
 
-    folders = get_links(baseurl, acs_year_dur_filter)
-    mode = "SF"
-    click.echo(folders)
-    #get_files_new_SF(url, year, dur, states)
+    # folders = get_links(baseurl, acs_year_dur_filter)
+    # mode = "SF"
+    # click.echo(folders)
+    # #get_files_new_SF(url, year, dur, states)
 
 
 @dl_acs.command()
