@@ -6,7 +6,7 @@ import re
 import us
 import logging
 
-def get_links(url, filter=None):
+def get_links(url, link_filter=None):
     """Return (filtered) links listed in an HTML table at a given URL.
 
     Args:
@@ -32,21 +32,23 @@ def get_links(url, filter=None):
     soup = bs(r.text, "html.parser")
     links = soup.select('td a')  # get all links in a table cell
 
-    if filter is not None:
+    if link_filter is not None:
         # If filter is set, return the good (non "None") hrefs from the filter
         return [goodlink for goodlink in
-                (filter(link['href']) for link in links)
+                [link_filter(link['href']) for link in links]
                 if goodlink is not None]
     else:
         # If no filter is set, just return the hrefs
         return [link['href'] for link in links]
 
 
-def acs_year_dur_filter(href):
+def acs_year_dur_filter(href, years=None, durs=None):
     """Clean and filter link href for ACS links.
 
     Args:
         href (str): the href component of a link
+        years (Optional[iterable]): a list of years to accept
+        durs (Optional[iterable]): a list of durations to accept
 
     Returns:
         If href matches correct format, returns a dict with relevant
@@ -54,14 +56,26 @@ def acs_year_dur_filter(href):
 
         If href doesn't match, returns None.
 
-    >>> acs_year_dur_filter('Alaska/')
+    >>> print acs_year_dur_filter('Alaska/')
     None
 
-    >>> acs_year_dur_filter('/acs2005/')
-    {'dir': '/acs2005', 'dur': None, 'href': '/acs2005', 'year': '2005'}
+    >>> acs_year_dur_filter('/acs2005/') == {
+    ...     'dir': 'acs2005', 
+    ...     'dur': None, 
+    ...      'href': '/acs2005',
+    ...      'year': '2005'}
+    True
 
-    >>> acs_year_dur_filter('http://www2.census.gov/acs2009_5yr/')
-    {'dir': '/acs2009_5yr', 'dur': '5', 'href': 'http://www2.census.gov/acs2009_5yr', 'year': '2009'}
+    >>> acs_year_dur_filter('http://www2.census.gov/acs2009_5yr/') == {
+    ...    'dir': '/acs2009_5yr', 
+    ...    'dur': '5', 
+    ...    'href': 'http://www2.census.gov/acs2009_5yr', 
+    ...    'year': '2009'}
+    True
+
+    >>> print acs_year_dur_filter('http://www2.census.gov/acs2009_5yr/', years=[2009], durs=[3])
+    None
+
     """
     # clean_href = href[0:-1] # Remove trailing slash from links
     # This regex gets the year and duration from the name of the folder on the
@@ -69,9 +83,15 @@ def acs_year_dur_filter(href):
     acs_re = re.compile(
         r'(?P<href>.*(?P<dir>acs(?P<year>[0-9]{4})(?:_(?P<dur>[135])yr)?))(?:/?$)')
     m = acs_re.search(href)
-   
+    # if m is not None:
+    #     print m.groups()
+    # else:
+    #     print "NO MATCH"
     # only want folders for ACS from 2005 or later
-    if m is not None and int(m.group('year')) >= 2005:
+    if (m is not None and 
+        int(m.group('year')) >= 2005 and 
+        (years is None or (int(m.group('year')) in years)) and
+        (durs is None or (int(m.group('dur')) in durs))):
         return {'dir': m.group('dir'),
                 'href': m.group('href'),
                 'year': m.group('year'),
@@ -395,7 +415,7 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
     # durations = (str(dur) for dur in durs)
     if log is not None:
         logging.basicConfig(filename=log, filemode='w')
-        
+
     if debug:
         logging.basicConfig(level=logging.DEBUG)
     elif verbose:
@@ -424,18 +444,15 @@ def sf(states, baseurl, startyear, endyear, durs):
     """Download Summary File datafiles"""
     click.echo("Downloading SF")
     #logger = logging.getLogger()
-    logging.info("INFO")
-    logging.debug("DEBUG")
-    logging.warning("WARNING")
     #click.echo(ctx.years)
 
-    # years = range(startyear, endyear+1)
-    # durations = (str(dur) for dur in durs)
+    years = range(startyear, endyear+1)
+    durations = [int(dur) for dur in durs]
 
-    # folders = get_links(baseurl, acs_year_dur_filter)
-    # mode = "SF"
-    # click.echo(folders)
-    # #get_files_new_SF(url, year, dur, states)
+    folders = get_links(baseurl, lambda href: acs_year_dur_filter(href, years, durations))
+    mode = "SF"
+    click.echo(folders)
+    #get_files_new_SF(url, year, dur, states)
 
 
 @dl_acs.command()
