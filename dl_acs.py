@@ -23,18 +23,20 @@ def get_links(url, filter=None):
 
     >>> get_links('http://www2.census.gov/acs2005/summaryfile/', filter=lambda h: h if not h.find('/') >= 0 else None)
     [u'ACS_2005_SF_Tech_Doc.pdf', u'ACS_SF_Worked_Example.pdf', u'README.pdf']
-    
+
     >>> len(get_links('http://www2.census.gov/acs2005/summaryfile/'))
     58
 
     """
     r = requests.get(url)
-    soup = bs(r.text)
-    links = soup.select('td a') # get all links in a table cell
+    soup = bs(r.text, "html.parser")
+    links = soup.select('td a')  # get all links in a table cell
 
     if filter is not None:
         # If filter is set, return the good (non "None") hrefs from the filter
-        return [goodlink for goodlink in (filter(link['href']) for link in links) if goodlink is not None]
+        return [goodlink for goodlink in
+                (filter(link['href']) for link in links)
+                if goodlink is not None]
     else:
         # If no filter is set, just return the hrefs
         return [link['href'] for link in links]
@@ -56,25 +58,48 @@ def acs_year_dur_filter(href):
     None
 
     >>> acs_year_dur_filter('/acs2005/')
-    {'dir': '/acs2005'}
+    {'dir': '/acs2005', 'dur': None, 'href': '/acs2005', 'year': '2005'}
+
+    >>> acs_year_dur_filter('http://www2.census.gov/acs2009_5yr/')
+    {'dir': '/acs2009_5yr', 'dur': '5', 'href': 'http://www2.census.gov/acs2009_5yr', 'year': '2009'}
     """
-    #clean_href = href[0:-1] # Remove trailing slash from links
-    # This regex gets the year and duration from the name of the folder on the Census server
-    acs_re = re.compile(r'(?P<href>.*acs(?P<year>[0-9]{4})(?:_(?P<dur>[135])yr)?)(?:/?$)')
+    # clean_href = href[0:-1] # Remove trailing slash from links
+    # This regex gets the year and duration from the name of the folder on the
+    # Census server
+    acs_re = re.compile(
+        r'(?P<href>.*(?P<dir>acs(?P<year>[0-9]{4})(?:_(?P<dur>[135])yr)?))(?:/?$)')
     m = acs_re.search(href)
-    if m is not None and int(m.group('year')) >= 2005: # only want folders for ACS from 2005 or later
-        return {'dir': m.group('href'), 'match': m}
+   
+    # only want folders for ACS from 2005 or later
+    if m is not None and int(m.group('year')) >= 2005:
+        return {'dir': m.group('dir'),
+                'href': m.group('href'),
+                'year': m.group('year'),
+                'dur': m.group('dur')}
     else:
         return None
 
+
 def acs_folder(year, dur, rooturl='http://www2.census.gov/'):
     """Return the folder on the server for an ACS year and duration.
+
+    Args:
+        year (int): Year of ACS
+        dur (int): Duration of multiyear estimates. Note that, before 2007, 
+                    all estimates were 1-year estimates
+        rooturl (Optional[str]): The base URL for the ACS files. The default
+                    should be fine unless the Census changes their URL
+                    structure.
+
+    Returns:
+        The URL for the ACS data from a given year and estimate duration.
 
     """
     if year < 2007:
         return rooturl + 'acs{0}/'.format(year)
     else:
         return rooturl + 'acs{0}_{1}yr/'.format(year, dur)
+
 
 def state_folder(year, dur, st, mode='SF', rooturl='http://www2.census.gov/'):
     """Return the folder on the server for an ACS year, duration, and state.
@@ -91,14 +116,10 @@ def state_folder(year, dur, st, mode='SF', rooturl='http://www2.census.gov/'):
         folder = rooturl + 'acs{0}_{1}yr/'.format(year, dur)
 
     # For PUMS, all same subfolder
-    if mode=="PUMS":
+    if mode == "PUMS":
         return folder + 'pums/'
 
     # Otherwise:
-    
-
-
-
 
 
 def state_filestub(st, is2005=False):
@@ -139,13 +160,14 @@ def state_filestub(st, is2005=False):
             else:
                 return u"UnitedStates"
     else:
-        return state.name.replace(" ","")
+        return state.name.replace(" ", "")
 
 
 ######################################
 #### GET REMOTE FILE LISTS        ####
 ######################################
-def get_acs_files(year, dur, states, mode="SF", rooturl='http://www2.census.gov/'):
+def get_acs_files(year, dur, states,
+                  mode="SF", rooturl='http://www2.census.gov/'):
     """Get list of files to download from server.
 
     The returned list is actually a list of dicts, with entries for the
@@ -206,15 +228,15 @@ def get_acs_files(year, dur, states, mode="SF", rooturl='http://www2.census.gov/
 
 
     """
-    if mode=="PUMS":
+    if mode == "PUMS":
         # For PUMS, just return the list of person and household files
         return [{'url': url,
-                    'file': 'unix_%s%s.zip' % (rectype, st),
-                    'state': st}
-                    for rectype in ('h', 'p')
+                 'file': 'unix_%s%s.zip' % (rectype, st),
+                 'state': st}
+                for rectype in ('h', 'p')
                 for st in states]
 
-    else: # Summary File has weird standards
+    else:  # Summary File has weird standards
         # Get state directory from year, dur, state
         return get_files_new_SF(url, year, dur, states)
 
@@ -235,12 +257,12 @@ def get_files_new_SF(url, year, dur, states):
     files = []
 
     # Set subdirectory based on year and duration
-    if year==2009 and dur==1: # weird exception
-        subdir = 'Entire_States/' 
-    elif year !=2009 and dur == 1: # single-year estimates except 2009
+    if year == 2009 and dur == 1:  # weird exception
+        subdir = 'Entire_States/'
+    elif year != 2009 and dur == 1:  # single-year estimates except 2009
         # The subdirectory starts with the year covered.
         subdir = '%s_ACSSF_By_State_All_Tables/' % year
-    else: # Multiyear estimates
+    else:  # Multiyear estimates
         # The subdirectory starts with the range of years covered
         start_yr = year - dur + 1
         subdir = '%s-%s_ACSSF_By_State_All_Tables/' % (start_yr, year)
@@ -249,7 +271,7 @@ def get_files_new_SF(url, year, dur, states):
     # Only want zip files
     for st in states:
         st_links = get_links(url + subdir)
-        for link in st_links: 
+        for link in st_links:
             if re.search(r'%s.*\.zip' % get_state_dir(st), link):
                 files.append({'url': st_dir, 'file': link, 'state': st})
     return files
@@ -263,9 +285,9 @@ def get_files_old_SF(url, year, dur, states):
     contains a subdirectory for each state, and within those subdirectories
     there is a listing of all the files as well as a zip file containing all
     those files. Thus the format is generally (with some exceptions):
-    
+
     acsYEAR_DURyr/summaryfile/StateName/all_st.zip
-    
+
     Where StateName is what is returned by get_state_dir(), basically
     the state name in camel case and without spaces, and st is the two-letter
     abbreviation (lowercase) for that state (or "us"). In 2005 and 2006, the outermost
@@ -279,10 +301,10 @@ def get_files_old_SF(url, year, dur, states):
     files = []
 
     for st in states:
-        is2005 = (year==2005)
+        is2005 = (year == 2005)
         st_dir = url + get_state_dir(st, is2005)
         st_links = get_links(st_dir)
-        
+
         if is2005:
             st_file = "all_%s.zip" % st
             geo_file = "%sgeo.2005-1yr" % st
@@ -290,28 +312,25 @@ def get_files_old_SF(url, year, dur, states):
             st_file = "all_%s.zip" % st
             geo_file = "g%s%s%s.txt" % (year, dur, st)
         elif "%s_all_2006.zip" % st in st_links:
-            st_file =  "%s_all_2006.zip" % st
+            st_file = "%s_all_2006.zip" % st
             geo_file = "g%s%s%s.txt" % (year, dur, st)
         else:
             print "NO FILE: %s" % st, st_dir
             break
-        
+
         files.append({'url': st_dir + '/', 'file': st_file, 'state': st})
         files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
     return files
 
 
-
-
-
-
 class CensusDownloader(object):
+
     """Class to hold downloader context.
 
     """
-    
+
     def __init__(self, outdir,
-                baseurl='http://www2.census.gov/', mode="SF"):
+                 baseurl='http://www2.census.gov/', mode="SF"):
         """Init method"""
         self.baseurl = baseurl
         self.outdir = outdir
@@ -343,16 +362,11 @@ class CensusDownloader(object):
         if self._remote_files is None:
             folders = get_links(self.baseurl, self.link_filter)
 
-
         return self._remote_files
-
 
     @property
     def dest_files(self):
         return self._dest_files
-
-
-
 
     def download(self):
         """Download remote files to destination.
@@ -361,24 +375,43 @@ class CensusDownloader(object):
         for f in self.remote_files:
             download(url, path)
 
-    
-    
 
 @click.group()
-def dl_acs():
+@click.option('--debug/--no-debug', default = False)
+@click.option('--verbose/--no-verbose', '-v/-no-v', default=False)
+@click.option('--baseurl',
+              default='http://www2.census.gov/',
+              help="Census root URL")
+@click.option('--startyear', '-s', type=click.INT, prompt=True)
+@click.option('--endyear', '-e', type=click.INT, prompt=True)
+@click.option('--durs', '-d', type=click.Choice(['1', '3', '5']), multiple=True, prompt=True)
+
+@click.argument('states', default='us')
+@click.pass_context
+def dl_acs(ctx, debug, verbose):
     """Example script."""
-    click.echo()
+    ctx = { 'debug': debug }
+    click.echo("Debugger on" and debug or "")
+
 
 @dl_acs.command()
-@click.option('--baseurl', default='http://www2.census.gov/', help="Census root URL")
-@click.option('--years', '-y', type=(click.INT, click.INT))
+#@click.option('--years', '-y', nargs=2, type=click.INT, multiple=True)
+#@click.option('--states', '-s')
 #@click.argument('outdir')
-def sf(baseurl, years):
+@click.pass_context
+def sf(ctx, baseurl, startyear, endyear, durs, states):
     """Download Summary File datafiles"""
-    click.echo("Downloading SF %s" % years)
+    click.echo("Downloading SF")
+    click.echo([startyear, endyear, durs, states])
 
+    years = range(startyear, endyear+1)
+    durations = (str(dur) for dur in durs)
+
+    folders = get_links(baseurl, acs_year_dur_filter)
     mode = "SF"
+    click.echo(folders)
     #get_files_new_SF(url, year, dur, states)
+
 
 @dl_acs.command()
 def pums():
