@@ -102,8 +102,8 @@ def acs_year_dur_filter(href, years=None, durs=None):
             (durs is None or dur in durs)):
             return {'dir': m.group('dir'),
                 'href': m.group('href'),
-                'year': m.group('year'),
-                'dur': m.group('dur')}
+                'year': year,
+                'dur': dur}
         else:
             return None
     else:
@@ -462,6 +462,9 @@ def sf(states, baseurl, startyear, endyear, durs):
     folders = get_links(baseurl, lambda href: acs_year_dur_filter(href, years, durations))
     mode = "SF"
     click.echo(folders)
+    for folder in folders:
+        rooturl = baseurl + folder['dir'] + '/'
+        files = get_files_old_SF(rooturl, folder['year'], folder['dur'])
     #get_files_new_SF(url, year, dur, states)
 
 
