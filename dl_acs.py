@@ -5,8 +5,22 @@ import click
 import re
 import us
 import logging
+import pprint
+#from colorama import Fore, Back, Style
+#from colorama import init as colorama_init
+#from termcolor import colored
 
 import concurrent.futures
+
+# Make termcolor work on Windows
+#colorama_init()
+import chromalog
+from chromalog.mark.helpers.simple import important, success
+logger = logging.getLogger(__name__)
+for handler in logging.root.handlers:
+    handler.addFilter(logging.Filter(__name__))
+#logging.critical("TEST CHROMALOG")
+#logger.critical("Testing Chromalog")
 
 def safe_make_dir(newdir):
     try:
@@ -121,8 +135,8 @@ def acs_year_dur_filter(href, years=None, durs=None):
     else:
         return None
 
-def get_state_dir(st, is2005=False):
-    """Given a 2-char abbreviation, return the state directory.
+def state_filestub(st, is2005=False):
+    """Given a 2-char abbreviation, return the state filestub (directory).
 
     The Census standard is the full state name, camel case, spaces
     removed. This generally is true for "United States" too, but in 2005
@@ -139,7 +153,7 @@ def get_state_dir(st, is2005=False):
         return state.name.replace(" ","")
 
 class AcsServer(object):
-    def init(self, baseurl, pums=False):
+    def __init__(self, baseurl, pums=False):
         self.baseurl = baseurl
         self.pums = pums
 
@@ -153,9 +167,9 @@ class AcsServer(object):
         if self.pums:
             r = requests.get(yd_url + '/pums/')
         else:
-            r = requests.get(yd_url + '/summaryfile/')
+            r = requests.get(yd_url + 'summaryfile/')
 
-        if r.status_code == requests.code.ok:
+        if r.status_code == requests.codes.ok:
             # PUMS is easy
             if self.pums:
                 return self.pums_files(r.url, year, dur, states)
@@ -165,14 +179,14 @@ class AcsServer(object):
             # is another layer we need to go into.
             links = get_links(r.url)
 
-            if 'Alabama/' in links:
+            if u'Alabama/' in links:
                 # If the links contain state names (we use Alabama to check)
                 # then, the files are organized in the old way.
                 return self.old_sf_files(r.url, year, dur, states)
             else:
                 return self.new_sf_files(r.url, year, dur, states)
         else:
-            logging.warning("Invalid summaryfile directory for year=%s dur=%s rooturl=%s" % (year, dur, rooturl))
+            logger.warning("Invalid summaryfile directory for year=%s dur=%s rooturl=%s" % (year, dur, r.url))
             return r.status_code
 
     def year_dur_url(self, year, dur):
@@ -188,11 +202,11 @@ class AcsServer(object):
 
         """
         if year < 2007:
-            return rooturl + 'acs{0}/'.format(year)
+            return self.baseurl + 'acs{0}/'.format(year)
         else:
-            return rooturl + 'acs{0}_{1}yr/'.format(year, dur)
+            return self.baseurl + 'acs{0}_{1}yr/'.format(year, dur)
 
-    def get_pums_files(self, url, year, dur, states):
+    def pums_files(self, url, year, dur, states):
         '''Get list of PUMS files to download from the server.
         The returned list is actually a list of dicts, with entries for the
         folder portion of the url, the actual file name, and then the state
@@ -229,7 +243,8 @@ class AcsServer(object):
 
         for st in states:
             is2005 = (year==2005)
-            st_dir = url + get_state_dir(st, is2005)
+            logger.debug("State filestub: %s" % state_filestub(st, is2005))
+            st_dir = url + state_filestub(st, is2005)
             st_links = get_links(st_dir)
             #print st_links
             
@@ -243,15 +258,16 @@ class AcsServer(object):
                 st_file =  "{0}_all_2006.zip".format(st)
                 geo_file = "g{0}{1}{2}.txt".format(year, dur, st)
             else:
-                logging.warning "NO FILE for: {0} {1}".format(st, st_dir)
+                logger.warning("NO FILE for: {0} {1}".format(st, st_dir))
                 continue
             
             files.append({'url': st_dir + '/', 'file': st_file, 'state': st})
             files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
         return files
         
-    def get_new_files(self, url, year, dur, states=None):
-        '''Get list of files to download from the server, using the new system.
+    def new_sf_files(self, url, year, dur, states):
+        """Get list of files to download from the server, using the new system.
+
         The returned list is actually a list of dicts, with entries for the
         folder portion of the url, the actual file name, and then the state
         abbreviation.
@@ -260,37 +276,36 @@ class AcsServer(object):
         the directories. There is one subdirectory within summaryfile/ that
         contains all the state files, each of which is just a single zipped file.
         Each state does NOT, thus, have a subdirectory itself.
-        '''
+        """
         files = []
-        
-        if states is None:
-            states = self.states
         
         if year==2009 and dur==1: # weird exception
             subdir = 'Entire_States/' 
         else:
             if dur == 1:
                 # The subdirectory starts with the year covered.
-                subdir = '%s_ACSSF_By_State_All_Tables/' % year
+                subdir = '{0}_ACSSF_By_State_All_Tables/'.format(year)
             else:
                 # The subdirectory starts with the range of years covered
                 start_yr = year - dur + 1
-                subdir = '%s-%s_ACSSF_By_State_All_Tables/' % (start_yr, year)
+                subdir = '{0}-{1}_ACSSF_By_State_All_Tables/'.format(start_yr, year)
                 
         for st in states:
             st_dir = url + subdir
             st_links = get_links(st_dir)
             for link in st_links:
-                if re.search(r'%s.*\.zip' % get_state_dir(st), link):
+                # look for the state abbreviation in any ZIP file
+                if re.search(r'{0}.*\.zip'.format(state_filestub(st)), link):
                     files.append({'url': st_dir, 'file': link, 'state': st})
                     
         return files
 
 class Local(object):
     """ Object representing local environment """
-    def init(self, outdir, pums=False):
+    def __init__(self, outdir, pums=False, overwrite):
         self.outdir = outdir
         self.pums = pums
+        self.overwrite = overwrite
 
     @property
     def outdir(self):
@@ -340,264 +355,359 @@ class Local(object):
         return {'yd_path': yd_path, 'state_filename': state_filename, 'geo_path': geo_path,
                 'zip_path': zip_path}
 
+    def download(self, files, year, dur):
+        """ Download all the files in a file list. """
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            for f in files:
+                url = "%s%s" % (f['url'], f['file'])
+                __, filename = os.path.split(f['file'])
+                fname, ext = os.path.splitext(filename)
+                if ext.upper() == ".ZIP":
+                    if fname.find("Not_Tracts_Block_Groups") >= 0:
+                        subdir = 'nontracts'
+                    elif fname.find("Tracts_Block_Groups_Only") >= 0:
+                        subdir = 'tracts'
+                    path = self.destination_paths(year, dur, f['state'], subdir)['zip_path']
+                else:
+                    path = self.destination_paths(year, dur, f['state'])['geo_path']
+                    # gets the filepath on the local system, where we download to
 
+                if overwrite or not os.path.exists(path):
+                    # If file does not already exist, then download it
+                    logger.info("Downloading <%s> to [%s]" % (url, path))
+                    #sys.stdout.flush()
+                    future = executor.submit(download, url, path)
+                    future.add_done_callback(self.download_callback)
+                else:
+                    logger.debug("NOT downloading: %s (already exists)" % path)
 
-def acs_folder(year, dur, rooturl='http://www2.census.gov/'):
-    """Return the folder on the server for an ACS year and duration.
-
-    Args:
-        year (int): Year of ACS
-        dur (int): Duration of multiyear estimates. Note that, before 2007, 
-                    all estimates were 1-year estimates
-        rooturl (Optional[str]): The base URL for the ACS files. The default
-                    should be fine unless the Census changes their URL
-                    structure.
-
-    Returns:
-        The URL for the ACS data from a given year and estimate duration.
-
-    """
-    if year < 2007:
-        return rooturl + 'acs{0}/'.format(year)
-    else:
-        return rooturl + 'acs{0}_{1}yr/'.format(year, dur)
-
-
-def state_folder(year, dur, st, mode='SF', rooturl='http://www2.census.gov/'):
-    """Return the folder on the server for an ACS year, duration, and state.
-
-    A folder consists of the root URL, plus the ACS folder for a year/
-    duration, plus some standard subdirectories, and then possibly a state
-    subdirectory.
-
-
-    """
-    if year < 2007:
-        folder = rooturl + 'acs{0}/'.format(year)
-    else:
-        folder = rooturl + 'acs{0}_{1}yr/'.format(year, dur)
-
-    # For PUMS, all same subfolder
-    if mode == "PUMS":
-        return folder + 'pums/'
-
-    # Otherwise:
-
-
-def state_filestub(st, is2005=False):
-    """Return the Census file stub (directory or filename) for a state.
-
-    File stubs refer to a string that the Census uses both as a directory
-    and as the filename (not including file extension).
-
-    The Census standard is the full state name, camel case, spaces
-    removed. This generally is true for "United States" too, but in 2005
-    they put a "0" in front of the name, to make sure it's sorted to the top.
-
-    Args:
-        st: 2-character abbreviation
-        is2005 (Optional): whether year is 2005
-
-    Returns:
-        A string with the state's directory name
-
-    >>> state_filestub('ny')
-    u'NewYork'
-
-    >>> state_filestub('us')
-    u'UnitedStates'
-
-    >>> state_filestub('us', is2005=True)
-    u'0UnitedStates'
-
-    >>> state_filestub('qq')
-    Exception
-    ...
-    """
-    state = us.states.lookup(st)
-    if state is None:
-        if st.upper() == "US":
-            if is2005:
-                return u"0UnitedStates"
-            else:
-                return u"UnitedStates"
-    else:
-        return state.name.replace(" ", "")
-
-
-######################################
-#### GET REMOTE FILE LISTS        ####
-######################################
-def get_acs_files(year, dur, states,
-                  mode="SF", rooturl='http://www2.census.gov/'):
-    """Get list of files to download from server.
-
-    The returned list is actually a list of dicts, with entries for the
-    folder portion of the url, the actual file name, and then the state
-    abbreviation.
-
-    Args:
-        year: the ACS year (the last year for multiyear estimates)
-        dur: the ACS multiyear duration (1, 3, or 5)
-        states (List[str]): a list of 2-letter state abbreviations (strings)
-        mode (Optional): summary file ("SF") or PUMS ("PUMS"). Defaults to "SF"
-        rooturl (Optional): the root URL. Defaults to 'http://www2.census.gov/'
-
-    Returns:
-        A list of dicts, where each dict represents a single file and has:
-            'folder': the URL of the folder containing the file
-            'file': the file name, including extension
-            'state': the 2-letter abbreviation of the state
-
-    Examples:
-        In 2009 and after, the summary file is pretty standard
-
-        >>> import pprint
-        >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'], mode='SF')
-        ... #
-        [{'folder': u'http://www2.census.gov/acs2009_1yr/summaryfile/Entire_States/',
-            'file': u'NewYork.zip', 'state': 'NY'},
-        {'folder': u'http://www2.census.gov/acs2009_1yr/summaryfile/Entire_States/',
-            'file': u'UnitedStates.zip', 'state': 'US'}]
-
-
-        In 2005, the US folder has a "0" at the beginning. Note the different names
-        for the files, as well as state-specific folders on the server.
-
-        >>> get_acs_files(year=2005, dur=1, states=['MA', 'US'], mode='SF')
-        ... #
-        [{'folder': u'http://www2.census.gov/acs2005/summaryfile/Massachusetts/',
-            'file': u'all_ma.zip', 'state': 'MA'},
-        {'folder': u'http://www2.census.gov/acs2005/summaryfile/0UnitedStates/',
-            'file': u'all_us.zip', 'state': 'US'}]
-
-
-        In 2006, the file names are different.
-        >>> get_acs_files(year=2006, dur=1, states=['NJ', 'US'], mode='SF')
-        [{'folder': u'http://www2.census.gov/acs2006/summaryfile/NewJersey/',
-            'file': u'nj_all_2006.zip', 'state': 'NJ'},
-        {'folder': u'http://www2.census.gov/acs2006/summaryfile/UnitedStates/',
-            'file': u'us_all_2006.zip', 'state': 'US'}]
-
-        Multiyear estimates example
-        >>> get_acs_files(year=2013, dur=5, states=['NY', 'US'], mode='SF')
-        None
-
-        PUMS example.
-        >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'], mode='PUMS')
-        None
-
-
-
-    """
-    if mode == "PUMS":
-        # For PUMS, just return the list of person and household files
-        return [{'url': url,
-                 'file': 'unix_%s%s.zip' % (rectype, st),
-                 'state': st}
-                for rectype in ('h', 'p')
-                for st in states]
-
-    else:  # Summary File has weird standards
-        # Get state directory from year, dur, state
-        return get_files_new_SF(url, year, dur, states)
-
-
-def get_files_new_SF(url, year, dur, states):
-    """Get remote files using new SF standard.
-
-    Starting in 2009, the Census is more consistent with the structure of
-    the directories. There is one subdirectory within summaryfile/ that
-    contains all the state files, each of which is just a single zipped file.
-    Each state does NOT, thus, have a subdirectory itself.
-
-    >>> get_files_new_SF('http://www2.census.gov/acs2009_1yr/summaryfile', 2009, 1, ['ny'])
-    None
-
-    """
-    # Start with empty list of files
-    files = []
-
-    # Set subdirectory based on year and duration
-    if year == 2009 and dur == 1:  # weird exception
-        subdir = 'Entire_States/'
-    elif year != 2009 and dur == 1:  # single-year estimates except 2009
-        # The subdirectory starts with the year covered.
-        subdir = '%s_ACSSF_By_State_All_Tables/' % year
-    else:  # Multiyear estimates
-        # The subdirectory starts with the range of years covered
-        start_yr = year - dur + 1
-        subdir = '%s-%s_ACSSF_By_State_All_Tables/' % (start_yr, year)
-
-    # Return list of files in subdirectory for each state
-    # Only want zip files
-    for st in states:
-        st_links = get_links(url + subdir)
-        for link in st_links:
-            if re.search(r'%s.*\.zip' % get_state_dir(st), link):
-                files.append({'url': st_dir, 'file': link, 'state': st})
-    return files
-
-
-def get_files_old_SF(url, year, dur, states):
-    """Get remote file list using old SF standard.
-
-    The Census, in its infinite wisdom, has very inconsistent naming conventions,
-    but the greatest difference is that, before 2009, the summaryfile/ directory
-    contains a subdirectory for each state, and within those subdirectories
-    there is a listing of all the files as well as a zip file containing all
-    those files. Thus the format is generally (with some exceptions):
-
-    acsYEAR_DURyr/summaryfile/StateName/all_st.zip
-
-    Where StateName is what is returned by get_state_dir(), basically
-    the state name in camel case and without spaces, and st is the two-letter
-    abbreviation (lowercase) for that state (or "us"). In 2005 and 2006, the outermost
-    directory is just acsYEAR, without any duration (and those are both 1-year files).
-    In 2006, moreover, the name of the actual zip files is different:
-        st_all_2006.zip
-
-
-    """
-    # Start with empty list of files
-    files = []
-
-    for st in states:
-        is2005 = (year == 2005)
-        st_dir = url + get_state_dir(st, is2005)
-        st_links = get_links(st_dir)
-
-        if is2005:
-            st_file = "all_%s.zip" % st
-            geo_file = "%sgeo.2005-1yr" % st
-        elif "all_%s.zip" % st in st_links:
-            st_file = "all_%s.zip" % st
-            geo_file = "g%s%s%s.txt" % (year, dur, st)
-        elif "%s_all_2006.zip" % st in st_links:
-            st_file = "%s_all_2006.zip" % st
-            geo_file = "g%s%s%s.txt" % (year, dur, st)
+    def download_callback():
+        '''This method is called after a file is finished downloading.
+        It extracts the file that was downloaded.'''
+        if future.exception() is not None:
+            raise future.exception()
         else:
-            print "NO FILE: %s" % st, st_dir
-            break
+            r = future.result()
+            logger.debug("DOWNLOAD CALLBACK; {0}".format(r))
+            path = r['path']
+            __, ext = os.path.splitext(path)
+            root = os.path.split(path)[0]
+            final_root = os.path.split(root)[0]
+            if ext.upper() == ".ZIP":
+                future = self.dl_executor.submit(self.extract_file, path, root, final_root)
+                future.add_done_callback(self.extract_callback)
 
-        files.append({'url': st_dir + '/', 'file': st_file, 'state': st})
-        files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
-    return files
+        ef extract_callback(self, future):
+        '''This method is called after a file has been extracted.'''
+        print "Extract Callback"
+        if future.exception() is not None:
+            raise future.exception()
+        else:
+            r = future.result()
+            print "EXTRACT CALLBACK: %s (%d files)" % (r['files'][0], len(r['files']))
+            print "ORIGINAL: %s DIR: %s INTO: %s FINAL_INTO: %s" % (r['original'], r['dirs'][0], r['into'], r['final_into'])
+            # Move files into root directory
+            for i, f in enumerate(r['files']):
+                src = "%s/%s" % (r['into'], f)
+                src_name = os.path.split(src)[1] # get file name
+                dst = "%s/%s" % (r['final_into'], src_name)
+                '''NOTE: in certain years, the geo files are repeated in each
+                sub-zip, but each one overwrites the previous one. Thus, there
+                is only one copy in the /raw/zip/ folder at the end. Then, after the
+                first subzip is processed, that one copy is moved into the /raw/ folder.
+                Each subsequent copy will look for the geo file in /raw/zip/ and not find
+                it, raising an error, which is why we don't try to move until checking
+                if the file exists.'''
+                if os.path.exists(src):
+                    shutil.move(src, dst)
+            # Then delete original
+            os.remove(r['original'])
+    
+    def extract_file(self, path, into, final_into=None):
+        """Extracts file at path to folder into. If final_into
+        is specified, then the final files (after recursively unzipping
+        everything) are moved into final_into."""
+        
+        print "EXTRACTING PATH:", path
+        with zipfile.ZipFile(path, 'r') as z:
+            # Extract all to d.root...
+            z.extractall(into)
+            # Then check to see if the files extracted contained more zip files!
+            drc = ''
+
+            extracted_files = []
+            dirs = []
+            for n in z.namelist():
+                # Move file into root directory
+                drc, fname = os.path.split(n)
+                __, ext = os.path.splitext(fname)
+                print fname, ext.upper()
+                if ext.upper() == ".ZIP":
+                    res = self.extract_file("%s/%s" % (into, n), into)
+                    extracted_files.extend(res['files'])
+                    dirs.extend(res['dirs'])
+                else:
+                    extracted_files.extend([n])
+                    dirs.extend([drc])
+            result = {'original': path, 'files': extracted_files, 'dirs': dirs, 'into': into, 'final_into': final_into}
+#             return result
+
+# def acs_folder(year, dur, rooturl='http://www2.census.gov/'):
+#     """Return the folder on the server for an ACS year and duration.
+
+#     Args:
+#         year (int): Year of ACS
+#         dur (int): Duration of multiyear estimates. Note that, before 2007, 
+#                     all estimates were 1-year estimates
+#         rooturl (Optional[str]): The base URL for the ACS files. The default
+#                     should be fine unless the Census changes their URL
+#                     structure.
+
+#     Returns:
+#         The URL for the ACS data from a given year and estimate duration.
+
+#     """
+#     if year < 2007:
+#         return rooturl + 'acs{0}/'.format(year)
+#     else:
+#         return rooturl + 'acs{0}_{1}yr/'.format(year, dur)
 
 
-class CensusDownloader(object):
+# def state_folder(year, dur, st, mode='SF', rooturl='http://www2.census.gov/'):
+#     """Return the folder on the server for an ACS year, duration, and state.
 
-    """Class to hold downloader context.
+#     A folder consists of the root URL, plus the ACS folder for a year/
+#     duration, plus some standard subdirectories, and then possibly a state
+#     subdirectory.
 
-    """
 
-    def __init__(self, baseurl, 
-                    years, durations, states):
-        """Init method"""
-        self.baseurl = baseurl
-        self.years = years
-        self.durations = durations
-        self.states = states
+#     """
+#     if year < 2007:
+#         folder = rooturl + 'acs{0}/'.format(year)
+#     else:
+#         folder = rooturl + 'acs{0}_{1}yr/'.format(year, dur)
+
+#     # For PUMS, all same subfolder
+#     if mode == "PUMS":
+#         return folder + 'pums/'
+
+#     # Otherwise:
+
+
+# def state_filestub(st, is2005=False):
+#     """Return the Census file stub (directory or filename) for a state.
+
+#     File stubs refer to a string that the Census uses both as a directory
+#     and as the filename (not including file extension).
+
+#     The Census standard is the full state name, camel case, spaces
+#     removed. This generally is true for "United States" too, but in 2005
+#     they put a "0" in front of the name, to make sure it's sorted to the top.
+
+#     Args:
+#         st: 2-character abbreviation
+#         is2005 (Optional): whether year is 2005
+
+#     Returns:
+#         A string with the state's directory name
+
+#     >>> state_filestub('ny')
+#     u'NewYork'
+
+#     >>> state_filestub('us')
+#     u'UnitedStates'
+
+#     >>> state_filestub('us', is2005=True)
+#     u'0UnitedStates'
+
+#     >>> state_filestub('qq')
+#     Exception
+#     ...
+#     """
+#     state = us.states.lookup(st)
+#     if state is None:
+#         if st.upper() == "US":
+#             if is2005:
+#                 return u"0UnitedStates"
+#             else:
+#                 return u"UnitedStates"
+#     else:
+#         return state.name.replace(" ", "")
+
+
+# ######################################
+# #### GET REMOTE FILE LISTS        ####
+# ######################################
+# def get_acs_files(year, dur, states,
+#                   mode="SF", rooturl='http://www2.census.gov/'):
+#     """Get list of files to download from server.
+
+#     The returned list is actually a list of dicts, with entries for the
+#     folder portion of the url, the actual file name, and then the state
+#     abbreviation.
+
+#     Args:
+#         year: the ACS year (the last year for multiyear estimates)
+#         dur: the ACS multiyear duration (1, 3, or 5)
+#         states (List[str]): a list of 2-letter state abbreviations (strings)
+#         mode (Optional): summary file ("SF") or PUMS ("PUMS"). Defaults to "SF"
+#         rooturl (Optional): the root URL. Defaults to 'http://www2.census.gov/'
+
+#     Returns:
+#         A list of dicts, where each dict represents a single file and has:
+#             'folder': the URL of the folder containing the file
+#             'file': the file name, including extension
+#             'state': the 2-letter abbreviation of the state
+
+#     Examples:
+#         In 2009 and after, the summary file is pretty standard
+
+#         >>> import pprint
+#         >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'], mode='SF')
+#         ... #
+#         [{'folder': u'http://www2.census.gov/acs2009_1yr/summaryfile/Entire_States/',
+#             'file': u'NewYork.zip', 'state': 'NY'},
+#         {'folder': u'http://www2.census.gov/acs2009_1yr/summaryfile/Entire_States/',
+#             'file': u'UnitedStates.zip', 'state': 'US'}]
+
+
+#         In 2005, the US folder has a "0" at the beginning. Note the different names
+#         for the files, as well as state-specific folders on the server.
+
+#         >>> get_acs_files(year=2005, dur=1, states=['MA', 'US'], mode='SF')
+#         ... #
+#         [{'folder': u'http://www2.census.gov/acs2005/summaryfile/Massachusetts/',
+#             'file': u'all_ma.zip', 'state': 'MA'},
+#         {'folder': u'http://www2.census.gov/acs2005/summaryfile/0UnitedStates/',
+#             'file': u'all_us.zip', 'state': 'US'}]
+
+
+#         In 2006, the file names are different.
+#         >>> get_acs_files(year=2006, dur=1, states=['NJ', 'US'], mode='SF')
+#         [{'folder': u'http://www2.census.gov/acs2006/summaryfile/NewJersey/',
+#             'file': u'nj_all_2006.zip', 'state': 'NJ'},
+#         {'folder': u'http://www2.census.gov/acs2006/summaryfile/UnitedStates/',
+#             'file': u'us_all_2006.zip', 'state': 'US'}]
+
+#         Multiyear estimates example
+#         >>> get_acs_files(year=2013, dur=5, states=['NY', 'US'], mode='SF')
+#         None
+
+#         PUMS example.
+#         >>> get_acs_files(year=2009, dur=1, states=['NY', 'US'], mode='PUMS')
+#         None
+
+
+
+#     """
+#     if mode == "PUMS":
+#         # For PUMS, just return the list of person and household files
+#         return [{'url': url,
+#                  'file': 'unix_%s%s.zip' % (rectype, st),
+#                  'state': st}
+#                 for rectype in ('h', 'p')
+#                 for st in states]
+
+#     else:  # Summary File has weird standards
+#         # Get state directory from year, dur, state
+#         return get_files_new_SF(url, year, dur, states)
+
+
+# def get_files_new_SF(url, year, dur, states):
+#     """Get remote files using new SF standard.
+
+#     Starting in 2009, the Census is more consistent with the structure of
+#     the directories. There is one subdirectory within summaryfile/ that
+#     contains all the state files, each of which is just a single zipped file.
+#     Each state does NOT, thus, have a subdirectory itself.
+
+#     >>> get_files_new_SF('http://www2.census.gov/acs2009_1yr/summaryfile', 2009, 1, ['ny'])
+#     None
+
+#     """
+#     # Start with empty list of files
+#     files = []
+
+#     # Set subdirectory based on year and duration
+#     if year == 2009 and dur == 1:  # weird exception
+#         subdir = 'Entire_States/'
+#     elif year != 2009 and dur == 1:  # single-year estimates except 2009
+#         # The subdirectory starts with the year covered.
+#         subdir = '%s_ACSSF_By_State_All_Tables/' % year
+#     else:  # Multiyear estimates
+#         # The subdirectory starts with the range of years covered
+#         start_yr = year - dur + 1
+#         subdir = '%s-%s_ACSSF_By_State_All_Tables/' % (start_yr, year)
+
+#     # Return list of files in subdirectory for each state
+#     # Only want zip files
+#     for st in states:
+#         st_links = get_links(url + subdir)
+#         for link in st_links:
+#             if re.search(r'%s.*\.zip' % get_state_dir(st), link):
+#                 files.append({'url': st_dir, 'file': link, 'state': st})
+#     return files
+
+
+# def get_files_old_SF(url, year, dur, states):
+#     """Get remote file list using old SF standard.
+
+#     The Census, in its infinite wisdom, has very inconsistent naming conventions,
+#     but the greatest difference is that, before 2009, the summaryfile/ directory
+#     contains a subdirectory for each state, and within those subdirectories
+#     there is a listing of all the files as well as a zip file containing all
+#     those files. Thus the format is generally (with some exceptions):
+
+#     acsYEAR_DURyr/summaryfile/StateName/all_st.zip
+
+#     Where StateName is what is returned by get_state_dir(), basically
+#     the state name in camel case and without spaces, and st is the two-letter
+#     abbreviation (lowercase) for that state (or "us"). In 2005 and 2006, the outermost
+#     directory is just acsYEAR, without any duration (and those are both 1-year files).
+#     In 2006, moreover, the name of the actual zip files is different:
+#         st_all_2006.zip
+
+
+#     """
+#     # Start with empty list of files
+#     files = []
+
+#     for st in states:
+#         is2005 = (year == 2005)
+#         st_dir = url + get_state_dir(st, is2005)
+#         st_links = get_links(st_dir)
+
+#         if is2005:
+#             st_file = "all_%s.zip" % st
+#             geo_file = "%sgeo.2005-1yr" % st
+#         elif "all_%s.zip" % st in st_links:
+#             st_file = "all_%s.zip" % st
+#             geo_file = "g%s%s%s.txt" % (year, dur, st)
+#         elif "%s_all_2006.zip" % st in st_links:
+#             st_file = "%s_all_2006.zip" % st
+#             geo_file = "g%s%s%s.txt" % (year, dur, st)
+#         else:
+#             print "NO FILE: %s" % st, st_dir
+#             break
+
+#         files.append({'url': st_dir + '/', 'file': st_file, 'state': st})
+#         files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
+#     return files
+
+
+# class CensusDownloader(object):
+
+#     """Class to hold downloader context.
+
+#     """
+
+#     def __init__(self, baseurl, 
+#                     years, durations, states):
+#         """Init method"""
+#         self.baseurl = baseurl
+#         self.years = years
+#         self.durations = durations
+#         self.states = states
 
         #self.debug = debug
         #self.verbose = verbose
@@ -655,18 +765,26 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
     # click.echo(ctx)
     # years = range(startyear, endyear+1)
     # durations = (str(dur) for dur in durs)
+    #chromalog.basicConfig(format="%(levelname)s: %(funcName)s:%(lineno)d -- ")
+    log_format = "%(levelname)-10s:%(funcName)16s:%(lineno)-5d -- %(message)s"
     if log is not None:
-        logging.basicConfig(filename=log, filemode='w')
+        chromalog.basicConfig(filename=log, filemode='w', format=log_format)
+    else:
+        chromalog.basicConfig(format=log_format)
+
+    
 
     if debug:
-        logging.basicConfig(level=logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
     elif verbose:
-        logging.basicConfig(level=logging.INFO)
+        logger.setLevel(logging.INFO)
     else:
-        logging.basicConfig(level=logging.WARNING)
+        logger.setLevel(logging.WARNING)
 
     #ctx.obj = CensusDownloader(baseurl,years, durations, states)
-    click.echo("Debugger on" and debug or "")
+    if debug:
+        #click.echo("Debugger on")
+        logger.debug("Debugger On")
 
 
 @dl_acs.command()
@@ -682,10 +800,11 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
 @click.option('--durs', '-d', type=click.Choice(['1', '3', '5']), multiple=True, prompt=True)
 @click.option('--overwrite/--no-overwrite', default=False)
 @click.option('--outdir','-o',help="Directory in which to store output", prompt=True)
-@click.argument('states', default='us')
+@click.argument('states', default='us', nargs=-1)
 #@click.pass_context
 def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
     """Download Summary File datafiles"""
+    logger.critical("Downloading")
     click.echo("Downloading SF")
     #logger = logging.getLogger()
     #click.echo(ctx.years)
@@ -695,15 +814,16 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
 
     years = range(startyear, endyear+1)
     durations = [int(dur) for dur in durs]
+    logger.debug("Years: {0}".format(years))
+    logger.debug("Durations: {0}".format(durations))
 
     for year in years:
         for dur in durations:
             # Check for invalid combinations
-            if year <= 2006 and dur != 1 or 
-                year <= 2008 and dur == 5 or
-                year > 2013 and dur == 3:
-                logging.info("Skipping invalid year/duration combination: {0} {1}-year".format(year, dur))
+            if (year <= 2006 and dur != 1) or (year <= 2008 and dur == 5) or (year > 2013 and dur == 3):
+                logger.info("Skipping invalid year/duration combination: {0} {1}-year".format(year, dur))
                 continue
+
 
             #rooturl = acs.year_dur_url(year, dur)
 
@@ -711,28 +831,33 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
             new_states = [s for s in states if overwrite or not
                             os.path.exists(local.destination_paths(year, dur, s)['zip_path'])]
 
-            files = acs.files_to_download(year, dur, new_states)
+            logger.debug("{0} {1}-year: {2}".format(important(year), important(dur), new_states))
+            #logger.debug("New States: {0}".format(new_states))
+
+            remote_files = acs.files_to_download(year, dur, new_states)
+            local.download
+            logger.info("%s\n%s" % (success("Files:"), pprint.pprint(files)))
             # Get file list based on PUMS/SF and year
 
             # Download files in list
 
 
     #folders = get_links(baseurl, lambda href: acs_year_dur_filter(href, years, durations))
-    mode = "SF"
-    click.echo(acs.folders)
-    for folder in acs.folders:
-        # The 'dir' of the folder is the year/duration directory on the Census server
-        rooturl = acs.baseurl + folder['dir'] + '/'
-        new_states = [s for s in states if not 
-                            os.path.exists(local.destination_paths(folder['year'], folder['dur'], s)['zip_path'])]
+    # mode = "SF"
+    # click.echo(acs.folders)
+    # for folder in acs.folders:
+    #     # The 'dir' of the folder is the year/duration directory on the Census server
+    #     rooturl = acs.baseurl + folder['dir'] + '/'
+    #     new_states = [s for s in states if not 
+    #                         os.path.exists(local.destination_paths(folder['year'], folder['dur'], s)['zip_path'])]
 
-        links = get_links(rooturl)
-        if 'Alabama/' in links:
-            files = get_old_files
-        else:
-            files = get new files
+    #     links = get_links(rooturl)
+    #     if 'Alabama/' in links:
+    #         files = get_old_files
+    #     else:
+    #         files = get new files
 
-        server.download(files, year, dur)
+    #     server.download(files, year, dur)
 
     #get_files_new_SF(url, year, dur, states)
 

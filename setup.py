@@ -9,7 +9,9 @@ setup(
 		'requests',
 		'beautifulsoup4',
 		'us',
-		'futures'
+		'futures',
+		#'colorama',
+		'chromalog'
 	],
 	entry_points='''
 		[console_scripts]
