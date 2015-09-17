@@ -6,6 +6,18 @@ import re
 import us
 import logging
 
+import concurrent.futures
+
+def safe_make_dir(newdir):
+    try:
+        os.makedirs(newdir)
+    except OSError:
+        # If can't create directory because it already exists, then fine.
+        # But if it doesn't already exist, there's some other
+        # problem and we should raise the exception
+        if not os.path.isdir(newdir):
+            raise
+
 def get_links(url, link_filter=None):
     """Return (filtered) links listed in an HTML table at a given URL.
 
@@ -108,6 +120,74 @@ def acs_year_dur_filter(href, years=None, durs=None):
             return None
     else:
         return None
+
+class AcsServer(object):
+    def init(self, baseurl, pums=False):
+        self.baseurl = baseurl
+        self.pums = pums
+
+    def folders(self, years, durations):
+        return get_links(self.baseurl, lambda href: acs_year_dur_filter(href, years, durations))
+
+    def files_to_download(self, folder, year, dur):
+        rooturl = self.baseurl + folder['dir'] + '/'
+        states = [s for s in states if not os.path.exists(
+
+
+class Local(object):
+    """ Object representing local environment """
+    def init(self, outdir, pums=False):
+        self.outdir = outdir
+        self.pums = pums
+
+    @property
+    def outdir(self):
+        return self._outdir
+
+    @outdir.setter
+    def outdir(self, outdir):
+        # Make sure directory exists. If not, create it.
+        safe_make_dir(outdir)
+        self._outdir = outdir
+
+    def year_dur_root(self, year, dur):
+        """ Get year/dur path, and create it and subfolders if it doesn't exist. """
+        yd_path = "{0}ACS{1}_{2}yr".format(self.outdir, year, dur)
+
+        safe_make_dir(yd_path)
+        if self.pums:
+            safe_make_dir(yd_path + '/raw/zip')
+            safe_make_dir(yd_path + '/clean')
+        else:
+            if dur == 5:
+                for subdir in ("tracts", "nontracts"):
+                    safe_make_dir("{0}/{1}/raw/zip".format(yd_path, subdir))
+                    safe_make_dir("{0}/{1}/stubs".format(yd_path, subdir))
+                    safe_make_dir("{0}/{1}/docs".format(yd_path, subdir))
+                    safe_make_dir("{0}/{1}/code".format(yd_path, subdir))
+            else:
+                safe_make_dir(yd_path + '/raw/zip') # this is recursive, so it will create /raw and then /raw/zip
+                safe_make_dir(yd_path + '/stubs')
+                safe_make_dir(yd_path + '/docs')
+                safe_make_dir(yd_path + '/code')
+
+        return yd_path
+
+    def destination_paths(self, year, dur, state, subdir=None):
+        """ Return dict of destination paths for a year/dur/state. """
+        yd_path = self.year_dur_root(year, dur)
+        state_filename = "%s_ACS%s_%syr.zip" % (state, year, dur)
+        geo_filename = "g" + str(year) + str(dur) + str(state) + ".txt"
+
+        if subdir is None:
+            geo_path = '%s/raw/%s' % (yd_path, geo_filename)
+            zip_path = '%s/raw/zip/%s' % (yd_path, state_filename)
+        else:
+            geo_path = '%s/%s/raw/%s' % (yd_path, subdir, geo_filename)
+            zip_path = '%s/%s/raw/zip/%s' % (yd_path, subdir, state_filename)
+        return {'yd_path': yd_path, 'state_filename': state_filename, 'geo_path': geo_path,
+                'zip_path': zip_path}
+
 
 
 def acs_folder(year, dur, rooturl='http://www2.census.gov/'):
@@ -448,23 +528,38 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
 @click.option('--startyear', '-s', type=click.INT, prompt=True)
 @click.option('--endyear', '-e', type=click.INT, prompt=True)
 @click.option('--durs', '-d', type=click.Choice(['1', '3', '5']), multiple=True, prompt=True)
+@click.option('--overwrite/--no-overwrite', default=False)
+@click.option('--outdir','-o',help="Directory in which to store output", prompt=True)
 @click.argument('states', default='us')
 #@click.pass_context
-def sf(states, baseurl, startyear, endyear, durs):
+def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
     """Download Summary File datafiles"""
     click.echo("Downloading SF")
     #logger = logging.getLogger()
     #click.echo(ctx.years)
+    acs = AcsServer(baseurl)
+    local = Local(outdir, pums=False)
+
 
     years = range(startyear, endyear+1)
     durations = [int(dur) for dur in durs]
 
-    folders = get_links(baseurl, lambda href: acs_year_dur_filter(href, years, durations))
+    #folders = get_links(baseurl, lambda href: acs_year_dur_filter(href, years, durations))
     mode = "SF"
-    click.echo(folders)
-    for folder in folders:
-        rooturl = baseurl + folder['dir'] + '/'
-        files = get_files_old_SF(rooturl, folder['year'], folder['dur'])
+    click.echo(acs.folders)
+    for folder in acs.folders:
+        # The 'dir' of the folder is the year/duration directory on the Census server
+        rooturl = acs.baseurl + folder['dir'] + '/'
+        new_states = [s for s in states if not 
+                            os.path.exists(local.destination_paths(folder['year'], folder['dur'], s)['zip_path'])]
+
+        links = get_links(rooturl)
+        if 'Alabama/' in links:
+            files = get_old_files
+        else:
+            files = get new files
+
+        server.download(files, year, dur)
     #get_files_new_SF(url, year, dur, states)
 
 

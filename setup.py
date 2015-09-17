@@ -8,7 +8,8 @@ setup(
 		'click',
 		'requests',
 		'beautifulsoup4',
-		'us'
+		'us',
+		'futures'
 	],
 	entry_points='''
 		[console_scripts]
