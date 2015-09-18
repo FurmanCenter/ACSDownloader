@@ -272,12 +272,12 @@ class AcsServer(object):
         if self.pums:
             pass
         else:
-            if u'Alabama/' in links:
+            if u'Alabama/' in state_urls:
                 # Old SF
                 return self.old_sf_files(year, dur, states)
             else:
                 # New SF
-                return self.new_sf_files(
+                return self.new_sf_files(year, dur, states)
 
 
 
@@ -286,37 +286,37 @@ class AcsServer(object):
 
     def files_to_download(self, year, dur, states):
         # Get the year/dur URL on the server
-        logger.debug(Fore.YELLOW + Style.NORMAL + "States URLs: %s" % pprint.pprint(self.data_rooturls) + Fore.RESET + Style.RESET_ALL)
-        yd_url = self.year_dur_url(year, dur)
+        return self.state_data_files(year, dur, states)
+        # yd_url = self.year_dur_url(year, dur)
 
-        if self.pums:
-            r_url = yd_url + 'pums/'
-        else:
-            r_url = yd_url + 'summaryfile/'
+        # if self.pums:
+        #     r_url = yd_url + 'pums/'
+        # else:
+        #     r_url = yd_url + 'summaryfile/'
 
-        logger.debug("Requesting {0}".format(r_url))
-        r = requests.get(r_url)
-        logger.debug("Request returned {0}".format(r))
+        # logger.debug("Requesting {0}".format(r_url))
+        # r = requests.get(r_url)
+        # logger.debug("Request returned {0}".format(r))
 
-        if r.status_code == requests.codes.ok:
-            # PUMS is easy
-            if self.pums:
-                return self.pums_files(r.url, year, dur, states)
+        # if r.status_code == requests.codes.ok:
+        #     # PUMS is easy
+        #     if self.pums:
+        #         return self.pums_files(r.url, year, dur, states)
 
-            # For summary file, get a list of the links in that folder
-            # In some years, each link represents a state. In others, there
-            # is another layer we need to go into.
-            links = get_links(r.url)
+        #     # For summary file, get a list of the links in that folder
+        #     # In some years, each link represents a state. In others, there
+        #     # is another layer we need to go into.
+        #     links = get_links(r.url)
 
-            if u'Alabama/' in links:
-                # If the links contain state names (we use Alabama to check)
-                # then, the files are organized in the old way.
-                return self.old_sf_files(r.url, year, dur, states)
-            else:
-                return self.new_sf_files(r.url, year, dur, states)
-        else:
-            logger.warning("Invalid summaryfile directory for year=%s dur=%s rooturl=%s" % (year, dur, r.url))
-            return r.status_code
+        #     if u'Alabama/' in links:
+        #         # If the links contain state names (we use Alabama to check)
+        #         # then, the files are organized in the old way.
+        #         return self.old_sf_files(r.url, year, dur, states)
+        #     else:
+        #         return self.new_sf_files(r.url, year, dur, states)
+        # else:
+        #     logger.warning("Invalid summaryfile directory for year=%s dur=%s rooturl=%s" % (year, dur, r.url))
+        #     return r.status_code
 
     def year_dur_url(self, year, dur, urltype="data"):
         """Return the URL to the folder on the server for an ACS year and duration.
@@ -429,23 +429,12 @@ class AcsServer(object):
         Each state does NOT, thus, have a subdirectory itself.
         """
         files = []
-        
-        if year==2009 and dur==1: # weird exception
-            subdir = 'Entire_States/' 
-        else:
-            if dur == 1:
-                # The subdirectory starts with the year covered.
-                subdir = '{0}_ACSSF_By_State_All_Tables/'.format(year)
-            else:
-                # The subdirectory starts with the range of years covered
-                start_yr = year - dur + 1
-                subdir = '{0}-{1}_ACSSF_By_State_All_Tables/'.format(start_yr, year)
-                
+          
         for st in states:
-            st_dir = url + subdir
+            st_dir = self.data_rooturls[year][dur]
             st_links = get_links(st_dir)
             for link in st_links:
-                # look for the state abbreviation in any ZIP file
+                # look for the state name in any ZIP file
                 if re.search(r'{0}.*\.zip'.format(state_filestub(st)), link):
                     files.append({'url': st_dir, 'file': link, 'state': st})
                     
