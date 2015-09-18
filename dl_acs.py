@@ -7,6 +7,7 @@ import us
 import logging
 import pprint
 from colorama import Fore, Back, Style
+from functools import partial
 #from colorama import init as colorama_init
 #from termcolor import colored
 
@@ -99,6 +100,8 @@ def get_links(url, link_filter=None):
         # If no filter is set, just return the hrefs
         return [link['href'] for link in links]
 
+def re_filter(href, compiled_re):
+    return compiled_re.search(href)
 
 def acs_year_dur_filter(href, years=None, durs=None):
     """Clean and filter link href for ACS links.
@@ -190,15 +193,15 @@ def state_filestub(st, is2005=False):
         return state.name.replace(" ","")
 
 class AcsServer(object):
-    def __init__(self, years, durs=[1, 3, 5], data_rooturls = None, baseurl=None, pums=False):
+    def __init__(self, years, durs=[1, 3, 5], rooturls = None, baseurl=None, pums=False):
         """ statesurl is a dict of durations """
         self.pums = pums
         self.durs = durs
         self.years = years
         self.urlroot = baseurl #self.urlroot(baseurl)
-        self.data_rooturls = data_rooturls
+        self.rooturls = rooturls
 
-        logger.info("Created States URLS: \n%s" % pprint.pformat(self.data_rooturls))
+        logger.info("Created States URLS: \n%s" % pprint.pformat(self.rooturls))
 
     @property
     def urlroot(self):
@@ -215,50 +218,62 @@ class AcsServer(object):
                 self._urlroot = "http://www2.census.gov/programs-surveys/acs/summary_file"
 
     @property
-    def data_rooturls(self):
-        return self._data_rooturls
+    def rooturls(self):
+        return self._rooturls
 
-    @data_rooturls.setter
-    def data_rooturls(self, user_states_urls):
+    @rooturls.setter
+    def rooturls(self, user_rooturls):
         """ Set the URL for the """
-        logger.debug("Initializing States URLs")
-        if user_states_urls:
-            logger.debug("Replacing states urls from user: %s" % pprint.pprint(user_states_urls))
-            self._data_rooturls = user_states_urls
+        logger.debug("Initializing Root URLs")
+        if user_rooturls:
+            logger.debug("Replacing root urls from user: %s" % pprint.pprint(user_rooturls))
+            self._rooturls = user_rooturls
         else:
-            data_rooturls = {}
+            rooturls = {}
             for year in self.years:
                 for dur in self.durs:  
-                    url = None
+                    dataurl = None
+                    docurl = None
                     if self.pums:
                         if year <= 2006 and dur == 1:
-                            url = "{root}/{year}/".format(root=self.urlroot, year=year)
+                            dataurl = "{root}/{year}/".format(root=self.urlroot, year=year)
                         elif (year <= 2008 and dur in [1, 3]) or (year >= 2009 and dur in [1, 3, 5]):
-                            url = "{root}/{year}/{dur}-Year/".format(root=self.urlroot, year=year, dur=dur)
+                            dataurl = "{root}/{year}/{dur}-Year/".format(root=self.urlroot, year=year, dur=dur)
                         else:
                             continue
                     else:
+                        # Data URL
                         if year <= 2006 and dur == 1:
-                            url = "{root}/{year}/data/".format(root=self.urlroot, year=year)
+                            dataurl = "{root}/{year}/data/".format(root=self.urlroot, year=year)
                         elif year <= 2008 and dur in [1, 3]:
-                            url = "{root}/{year}/data/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
+                            dataurl = "{root}/{year}/data/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
                         elif year == 2009 and dur == 1:
                             # Weird exception
-                            url = "{root}/{year}/data/{dur}_year-all-states/".format(root=self.urlroot, year=year, dur=dur)
+                            dataurl = "{root}/{year}/data/{dur}_year-all-states/".format(root=self.urlroot, year=year, dur=dur)
                         elif year >= 2009 and dur in [1, 3, 5]:
-                            url = "{root}/{year}/data/{dur}_year_by_states/".format(root=self.urlroot, year=year, dur=dur)
+                            dataurl = "{root}/{year}/data/{dur}_year_by_state/".format(root=self.urlroot, year=year, dur=dur)
                         else:
                             continue
+                        
+                        # Documentation URL
+                        if year <= 2006 or year >= 2013:
+                            docurl = "{root}/{year}/documentation/".format(root=self.urlroot, year=year)
+                        elif year <= 2012:
+                            docurl = "{root}/{year}/documentation/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
 
-                    if valid_url(url):
-                        logger.debug("Valid states url ({year}/{dur}-year): {url}".format(year=year, dur=dur, url=url))
-                        if year in data_rooturls:
-                            data_rooturls[year][dur] = url
+                    # Test for validity of data URL
+                    if valid_url(dataurl):
+                        logger.debug("Valid data root url ({year}/{dur}-year): {url}".format(year=year, dur=dur, url=dataurl))
+                        if year in rooturls:
+                            rooturls[year][dur] = { 'data': dataurl, 'documentation': docurl }
                         else:
-                            data_rooturls[year] = { dur: url }
+                            rooturls[year] = { dur: { 'data': dataurl, 'documentation': docurl } }
                     else:
-                        logger.warning("Invalid states url ({year}/{dur}-year): {url}".format(year=year, dur=dur, url=url))
-            self._data_rooturls = data_rooturls
+                        logger.warning("Invalid data root url ({year}/{dur}-year): {url}".format(year=year, dur=dur, url=dataurl))
+            self._rooturls = rooturls
+
+    def documentation_rooturls(self):
+        logger.debug("Initializing Documentation URLs")
 
 
     def folders(self, years, durations):
@@ -266,7 +281,7 @@ class AcsServer(object):
 
 
     def state_data_files(self, year, dur, states):
-        state_urls = get_links(self.data_rooturls[year][dur])
+        state_urls = get_links(self.rooturls[year][dur]['data'])
         data_files = []
 
         if self.pums:
@@ -282,11 +297,49 @@ class AcsServer(object):
 
 
     def stubs_and_documentation(self, year, dur):
-        pass
+        doc_url = self.rooturls[year][dur]['documentation']
+
+        # Technical documentation PDF file
+        tech_doc_re = re.compile(r'(.*_SF_Tech_Doc\.pdf)')
+        tech_doc = get_links(doc_url, link_filter = partial(re_filter, compiled_re = tech_doc_re) )
+        logger.debug("Tech doc: %s" % tech_doc)
+
+        # Stubs file
+        old_stub_re = re.compile(r'merge_5_6.*')
+        new_stub_re = re.compile(r'Sequence_?Number_?Table_?Number_?Lookup.*')
+        dur_stub_re = re.compile(r'ACS_' + re.escape(dur) + r'yr_Seq_Table_Number_Lookup.*')
+        logger.debug(pprint.pformat(get_links(doc_url)))
+
+        # Filter for old and new stub files
+        def match_old_or_new(url):
+            old = old_stub_re.search(url)
+            if old:
+                return old
+            new = new_stub_re.search(url)
+            if new:
+                return new
+            return dur_stub_re.search(url)
+
+        if year==2005:
+            # 2005 stubs were not moved to new server
+            stubs = ["http://www2.census.gov/acs2005/Chapter_6_acs_2005_tables_Sum_file_shells.xls"]
+        elif year == 2006:
+            stubs = ["http://www2.census.gov/acs2006/merge_5_6_final.txt",
+                      "http://www2.census.gov/acs2006/merge_5_6_final.xls"] 
+        elif year == 2007 or year >= 2013:
+            stubs = get_links(doc_url, link_filter=match_old_or_new)
+        elif year <= 2012:
+            stubs = get_links(doc_url + "user_tools/", link_filter=match_old_or_new)
+
+        logger.debug("STUBS: \n%s" % pprint.pformat(stubs))
 
     def files_to_download(self, year, dur, states):
         # Get the year/dur URL on the server
-        return self.state_data_files(year, dur, states)
+        datafiles = self.state_data_files(year, dur, states)
+        stubs_and_docs = self.stubs_and_documentation(year, dur)
+        return { 'data': datafiles,
+                'stubs': stubs_and_docs['stubs'],
+                'docs': stubs_and_docs['docs'] }
         # yd_url = self.year_dur_url(year, dur)
 
         # if self.pums:
@@ -318,42 +371,42 @@ class AcsServer(object):
         #     logger.warning("Invalid summaryfile directory for year=%s dur=%s rooturl=%s" % (year, dur, r.url))
         #     return r.status_code
 
-    def year_dur_url(self, year, dur, urltype="data"):
-        """Return the URL to the folder on the server for an ACS year and duration.
+    # def year_dur_url(self, year, dur, urltype="data"):
+    #     """Return the URL to the folder on the server for an ACS year and duration.
 
-        Args:
-            year (int): Year of ACS
-            dur (int): Duration of multiyear estimates. Note that, before 2007, 
-                        all estimates were 1-year estimates
+    #     Args:
+    #         year (int): Year of ACS
+    #         dur (int): Duration of multiyear estimates. Note that, before 2007, 
+    #                     all estimates were 1-year estimates
 
-        Returns:
-            The URL for the ACS data from a given year and estimate duration.
+    #     Returns:
+    #         The URL for the ACS data from a given year and estimate duration.
 
-        """
-        if urltype == "data":
-            if self.pums:
-                if year < 2007:
-                    return "{root}/{year}/".format(root=self.urlroot, year=year)
-                else:
-                    return "{root}/{year}/{dur}-Year/".format(root=self.urlroot, year=year, dur=dur)
-            else:
-                if year <= 2006:
-                    return "{root}/{year}/data/".format(root=self.urlroot, year=year)
-                elif year <= 2008:
-                    return "{root}/{year}/data/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
-                elif year == 2009 and dur == 1:
-                    # Weird exception
-                    return "{root}/{year}/data/{dur}_year-all-states/".format(root=self.urlroot, year=year, dur=dur)
-                else:
-                    return "{root}/{year}/data/{dur}_year_by_states/".format(root=self.urlroot, year=year, dur=dur)
-        elif urltype == "documentation":
-            if self.pums:
-                pass
-            else:
-                if year <= 2006 or year >= 2013:
-                    return "{root}/{year}/documentation/".format(root=self.urlroot, year=year)
-                elif year <= 2012:
-                    return "{root}/{year}/documentation/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
+    #     """
+    #     if urltype == "data":
+    #         if self.pums:
+    #             if year < 2007:
+    #                 return "{root}/{year}/".format(root=self.urlroot, year=year)
+    #             else:
+    #                 return "{root}/{year}/{dur}-Year/".format(root=self.urlroot, year=year, dur=dur)
+    #         else:
+    #             if year <= 2006:
+    #                 return "{root}/{year}/data/".format(root=self.urlroot, year=year)
+    #             elif year <= 2008:
+    #                 return "{root}/{year}/data/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
+    #             elif year == 2009 and dur == 1:
+    #                 # Weird exception
+    #                 return "{root}/{year}/data/{dur}_year-all-states/".format(root=self.urlroot, year=year, dur=dur)
+    #             else:
+    #                 return "{root}/{year}/data/{dur}_year_by_states/".format(root=self.urlroot, year=year, dur=dur)
+    #     elif urltype == "documentation":
+    #         if self.pums:
+    #             pass
+    #         else:
+    #             if year <= 2006 or year >= 2013:
+    #                 return "{root}/{year}/documentation/".format(root=self.urlroot, year=year)
+    #             elif year <= 2012:
+    #                 return "{root}/{year}/documentation/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
                
 
 
@@ -395,7 +448,7 @@ class AcsServer(object):
         for st in states:
             is2005 = (year==2005)
             logger.debug("State filestub: %s" % state_filestub(st, is2005))
-            st_dir = self.data_rooturls[year][dur] + state_filestub(st, is2005)
+            st_dir = self.rooturls[year][dur]['data'] + state_filestub(st, is2005)
             st_links = get_links(st_dir)
             #print st_links
             
@@ -416,7 +469,7 @@ class AcsServer(object):
             files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
         return files
         
-    def new_sf_files(self, url, year, dur, states):
+    def new_sf_files(self, year, dur, states):
         """Get list of files to download from the server, using the new system.
 
         The returned list is actually a list of dicts, with entries for the
@@ -431,7 +484,7 @@ class AcsServer(object):
         files = []
           
         for st in states:
-            st_dir = self.data_rooturls[year][dur]
+            st_dir = self.rooturls[year][dur]['data']
             st_links = get_links(st_dir)
             for link in st_links:
                 # look for the state name in any ZIP file
@@ -938,16 +991,17 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
 #@click.option('--years', '-y', nargs=2, type=click.INT, multiple=True)
 #@click.option('--states', '-s')
 #@click.argument('outdir')
+@click.option('--dryrun/--no-dryrun', help="Don't download files, just get list of files", default=False, is_flag=True)
 @click.option('--startyear', '-s', type=click.INT, prompt=True)
 @click.option('--endyear', '-e', type=click.INT, prompt=True)
 @click.option('--durs', '-d', type=click.Choice(['1', '3', '5']), multiple=True, prompt=True)
-@click.option('--outdir','-o', help="Directory in which to store output", prompt=True)
+@click.option('--outdir','-o', type=click.Path(file_okay=False, writable=True), help="Directory in which to store output", prompt=True)
 @click.option('--overwrite/--no-overwrite', default=False)
 @click.option('--baseurl',
               help="Census root URL")
 @click.argument('states', default='us', nargs=-1)
 #@click.pass_context
-def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
+def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir, dryrun):
     """Download Summary File datafiles"""
     logger.critical("Downloading")
     click.echo("Downloading SF")
@@ -963,7 +1017,7 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
     logger.debug("Durations: {0}".format(durations))
 
     acs = AcsServer(baseurl=baseurl, years=years, durs=durations, pums=False)
-    local = Local(outdir, pums=False)
+    local = Local(outdir, pums, overwrite)
 
     # Get list of files to download
     # Get list of data files
@@ -990,10 +1044,11 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
             #logger.debug("New States: {0}".format(new_states))
 
             remote_files = acs.files_to_download(year, dur, new_states)
-            logger.debug("Files to download: \n{0}".format(pprint.pformat(remote_files)))
+            logger.debug("Files to download: \n{0}{1}{2}".format(Fore.MAGENTA, pprint.pformat([str(f['url'] + f['file']).replace(acs.urlroot, "") for f in remote_files]), Fore.RESET))
 
-            #local.download_files(remote_files, year, dur)
-            logger.info("%s\n%s" % (success("Files:"), pprint.pformat(remote_files)))
+            if not dryrun:
+                local.download_files(remote_files, year, dur)
+            #logger.info("%s\n%s" % (success("Files:"), pprint.pformat(remote_files)))
             # Get file list based on PUMS/SF and year
 
             # Download files in list
