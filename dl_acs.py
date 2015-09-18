@@ -32,6 +32,36 @@ def safe_make_dir(newdir):
         if not os.path.isdir(newdir):
             raise
 
+def download(url, path, chunk_size=1024*1024):
+    """Download a file from a url to a file path
+
+    Keyword arguments:
+    url -- the URL of the file to be downloaded
+    path -- the file path to serve as destination for downloaded file
+    chunk_size -- the size of the file chunks (defaults to 1024^2)
+
+    Returns a dictionary with following keys:
+    'success' -- Boolean for whether downloaded without error
+    'status' -- the status code
+    """
+    r = requests.get(url, stream=True)
+    if r.status_code != requests.codes.ok:
+        logger.error("Got status %s from %s" % (r.status_code, url))
+        return {'success': False, 'status': r.status_code, 'url': url, 'path': path}
+    with open(path, 'wb') as f:
+        total_length = int(r.headers.get('content-length'))
+        with click.progressbar(r.iter_content(chunk_size=chunk_size), label="Downloading {0}".format(os.path.split(r.url)[1])) as bar:
+            for chunk in bar:
+                if chunk:
+                    f.write(chunk)
+                    f.flush()
+
+        # for chunk in progress.bar(r.iter_content(chunk_size=chunk_size), expected_size=(total_length/chunk_size) + 1): 
+        #     if chunk:
+        #         f.write(chunk)
+        #         f.flush()
+    return {'success': True, 'status': r.status_code, 'url': url, 'path': path}
+
 def get_links(url, link_filter=None):
     """Return (filtered) links listed in an HTML table at a given URL.
 
@@ -165,9 +195,13 @@ class AcsServer(object):
         yd_url = self.year_dur_url(year, dur)
 
         if self.pums:
-            r = requests.get(yd_url + '/pums/')
+            r_url = yd_url + 'pums/'
         else:
-            r = requests.get(yd_url + 'summaryfile/')
+            r_url = yd_url + 'summaryfile/'
+
+        logger.debug("Requesting {0}".format(r_url))
+        r = requests.get(r_url)
+        logger.debug("Request returned {0}".format(r))
 
         if r.status_code == requests.codes.ok:
             # PUMS is easy
@@ -302,7 +336,7 @@ class AcsServer(object):
 
 class Local(object):
     """ Object representing local environment """
-    def __init__(self, outdir, pums=False, overwrite):
+    def __init__(self, outdir, pums=False, overwrite=False):
         self.outdir = outdir
         self.pums = pums
         self.overwrite = overwrite
@@ -355,11 +389,12 @@ class Local(object):
         return {'yd_path': yd_path, 'state_filename': state_filename, 'geo_path': geo_path,
                 'zip_path': zip_path}
 
-    def download(self, files, year, dur):
+    def download_files(self, files, year, dur):
         """ Download all the files in a file list. """
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             for f in files:
-                url = "%s%s" % (f['url'], f['file'])
+                logger.debug("Trying to download {0}".format(f))
+                url = "{url}{file}".format(url=f['url'], file=f['file'])
                 __, filename = os.path.split(f['file'])
                 fname, ext = os.path.splitext(filename)
                 if ext.upper() == ".ZIP":
@@ -367,21 +402,23 @@ class Local(object):
                         subdir = 'nontracts'
                     elif fname.find("Tracts_Block_Groups_Only") >= 0:
                         subdir = 'tracts'
+                    else:
+                        subdir = None
                     path = self.destination_paths(year, dur, f['state'], subdir)['zip_path']
                 else:
                     path = self.destination_paths(year, dur, f['state'])['geo_path']
                     # gets the filepath on the local system, where we download to
 
-                if overwrite or not os.path.exists(path):
+                if self.overwrite or not os.path.exists(path):
                     # If file does not already exist, then download it
-                    logger.info("Downloading <%s> to [%s]" % (url, path))
+                    logger.info("Downloading <{url}> to [{path}]".format(url=url, path=path))
                     #sys.stdout.flush()
                     future = executor.submit(download, url, path)
                     future.add_done_callback(self.download_callback)
                 else:
                     logger.debug("NOT downloading: %s (already exists)" % path)
 
-    def download_callback():
+    def download_callback(self, future):
         '''This method is called after a file is finished downloading.
         It extracts the file that was downloaded.'''
         if future.exception() is not None:
@@ -397,7 +434,7 @@ class Local(object):
                 future = self.dl_executor.submit(self.extract_file, path, root, final_root)
                 future.add_done_callback(self.extract_callback)
 
-        ef extract_callback(self, future):
+    def extract_callback(self, future):
         '''This method is called after a file has been extracted.'''
         print "Extract Callback"
         if future.exception() is not None:
@@ -450,6 +487,10 @@ class Local(object):
                     extracted_files.extend([n])
                     dirs.extend([drc])
             result = {'original': path, 'files': extracted_files, 'dirs': dirs, 'into': into, 'final_into': final_into}
+            return result
+
+
+
 #             return result
 
 # def acs_folder(year, dur, rooturl='http://www2.census.gov/'):
@@ -791,15 +832,14 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
 #@click.option('--years', '-y', nargs=2, type=click.INT, multiple=True)
 #@click.option('--states', '-s')
 #@click.argument('outdir')
-
-@click.option('--baseurl',
-              default='http://www2.census.gov/',
-              help="Census root URL")
 @click.option('--startyear', '-s', type=click.INT, prompt=True)
 @click.option('--endyear', '-e', type=click.INT, prompt=True)
 @click.option('--durs', '-d', type=click.Choice(['1', '3', '5']), multiple=True, prompt=True)
+@click.option('--outdir','-o', help="Directory in which to store output", prompt=True)
 @click.option('--overwrite/--no-overwrite', default=False)
-@click.option('--outdir','-o',help="Directory in which to store output", prompt=True)
+@click.option('--baseurl',
+              default='http://www2.census.gov/',
+              help="Census root URL")
 @click.argument('states', default='us', nargs=-1)
 #@click.pass_context
 def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
@@ -830,13 +870,17 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir):
              # Limit states to those where zip files don't still exist, unless overwrite
             new_states = [s for s in states if overwrite or not
                             os.path.exists(local.destination_paths(year, dur, s)['zip_path'])]
+            if len(new_states) == 0:
+                logger.info("Skipping {year} {dur}-year: All states already downloaded ({states})".format(year=year, dur=dur, states=states))
 
             logger.debug("{0} {1}-year: {2}".format(important(year), important(dur), new_states))
             #logger.debug("New States: {0}".format(new_states))
 
             remote_files = acs.files_to_download(year, dur, new_states)
-            local.download
-            logger.info("%s\n%s" % (success("Files:"), pprint.pprint(files)))
+            logger.debug("Files to download: \n{0}".format(pprint.pprint(remote_files)))
+
+            local.download_files(remote_files, year, dur)
+            logger.info("%s\n%s" % (success("Files:"), pprint.pprint(remote_files)))
             # Get file list based on PUMS/SF and year
 
             # Download files in list
