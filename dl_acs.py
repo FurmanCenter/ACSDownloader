@@ -19,6 +19,10 @@ import chromalog
 from chromalog.mark.helpers.simple import important, success
 logger = logging.getLogger(__name__)
 
+fh = logging.FileHandler('dl_acs.log', mode='w')
+fh.setLevel(logging.DEBUG)
+logger.addHandler(fh)
+
 # for handler in logging.root.handlers:
 #     logger.debug(handler)
 #     handler.addFilter(logging.Filter(__name__))
@@ -53,7 +57,7 @@ def download(url, path, chunk_size=1024*1024):
         return {'success': False, 'status': r.status_code, 'url': url, 'path': path}
     with open(path, 'wb') as f:
         total_length = int(r.headers.get('content-length'))
-        with click.progressbar(r.iter_content(chunk_size=chunk_size), label="Downloading {0}".format(os.path.split(r.url)[1])) as bar:
+        with click.progressbar(r.iter_content(chunk_size=chunk_size), label="Downloading {0}\n".format(os.path.split(r.url)[1])) as bar:
             for chunk in bar:
                 if chunk:
                     f.write(chunk)
@@ -247,9 +251,9 @@ class AcsServer(object):
                             dataurl = "{root}/{year}/data/".format(root=self.urlroot, year=year)
                         elif year <= 2008 and dur in [1, 3]:
                             dataurl = "{root}/{year}/data/{dur}_year/".format(root=self.urlroot, year=year, dur=dur)
-                        elif year == 2009 and dur == 1:
-                            # Weird exception
-                            dataurl = "{root}/{year}/data/{dur}_year-all-states/".format(root=self.urlroot, year=year, dur=dur)
+                        # elif year == 2009 and dur == 1:
+                        #     # Weird exception
+                        #     dataurl = "{root}/{year}/data/{dur}_year-all-states/".format(root=self.urlroot, year=year, dur=dur)
                         elif year >= 2009 and dur in [1, 3, 5]:
                             dataurl = "{root}/{year}/data/{dur}_year_by_state/".format(root=self.urlroot, year=year, dur=dur)
                         else:
@@ -270,6 +274,10 @@ class AcsServer(object):
                             rooturls[year] = { dur: { 'data': dataurl, 'documentation': docurl } }
                     else:
                         logger.warning("Invalid data root url ({year}/{dur}-year): {url}".format(year=year, dur=dur, url=dataurl))
+                        # if year in rooturls:
+                        #     rooturls[year][dur] = { 'data': None, 'documentation': None }
+                        # else:
+                        #     rooturls[year] = { dur: { 'data': None, 'documentation': None } }
             self._rooturls = rooturls
 
     def documentation_rooturls(self):
@@ -281,7 +289,12 @@ class AcsServer(object):
 
 
     def state_data_files(self, year, dur, states):
-        state_urls = get_links(self.rooturls[year][dur]['data'])
+        try:
+            state_urls = get_links(self.rooturls[year][dur]['data'])
+        except KeyError:
+            logger.error("No valid data URL for {year}, {dur}".format(year=year, dur=dur))
+            return []
+
         data_files = []
 
         if self.pums:
@@ -297,7 +310,11 @@ class AcsServer(object):
 
 
     def stubs_and_documentation(self, year, dur):
-        doc_url = self.rooturls[year][dur]['documentation']
+        try:
+            doc_url = self.rooturls[year][dur]['documentation']
+        except KeyError:
+            logger.error("No valid documentation URL for {year}, {dur}".format(year=year, dur=dur))
+            return { 'stubs': [], 'docs': [], 'macro': [] }
 
 
         # Technical documentation PDF file
@@ -332,19 +349,25 @@ class AcsServer(object):
 
         if year==2005:
             # 2005 stubs were not moved to new server
-            stubs = [{ 'url': "http://www2.census.gov/acs2005/",
-                        'file': "Chapter_6_acs_2005_tables_Sum_file_shells.xls" }]
+            stub_urls = ["http://www2.census.gov/acs2005/Chapter_6_acs_2005_tables_Sum_file_shells.xls"]
+            #stubs = [{ 'url': "http://www2.census.gov/acs2005/",
+            #            'file': "Chapter_6_acs_2005_tables_Sum_file_shells.xls" }]
         elif year == 2006:
-            stubs = [{ 'url': "http://www2.census.gov/acs2006/",
-                        'file': "merge_5_6_final.txt" },
-                    { 'url': "http://www2.census.gov/acs2006/",
-                    'file': "merge_5_6_final.xls" }] 
+            stub_urls = ["http://www2.census.gov/acs2006/merge_5_6_final.txt", "http://www2.census.gov/acs2006/merge_5_6_final.xls" ]
+            # stubs = [{ 'url': "http://www2.census.gov/acs2006/",
+            #             'file': "merge_5_6_final.txt" },
+            #         { 'url': "http://www2.census.gov/acs2006/",
+            #         'file': "merge_5_6_final.xls" }] 
         elif year == 2007 or year >= 2013:
             stub_files = get_links(doc_url, link_filter=_match_old_or_new)
-            stubs = [{ 'url': doc_url, 'file': f } for f in stub_files]
+            stub_urls = [doc_url + f for f in stub_files]
+            #tubs = [{ 'url': doc_url, 'file': f } for f in stub_files]
         elif year <= 2012:
             stub_files = get_links(doc_url + "user_tools/", link_filter=_match_old_or_new)
-            stubs = [{ 'url': doc_url + "user_tools/", 'file': f } for f in stub_files]
+            stub_urls = [doc_url + "user_tools/" + f for f in stub_files]
+            #stubs = [{ 'url': doc_url + "user_tools/", 'file': f } for f in stub_files]
+
+        stubs = [{ 'url': u } for u in stub_urls ]
 
         # Example Macros
         if year<=2006:
@@ -358,6 +381,7 @@ class AcsServer(object):
         else:
             macro_url = doc_url + "user_tools/SF_All_Macro.sas"
 
+        macros = [{ 'url': macro_url }]
 
         # """
         #             http://www2.census.gov/programs-surveys/acs/summary_file/2007/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
@@ -370,7 +394,7 @@ class AcsServer(object):
         #             http://www2.census.gov/programs-surveys/acs/summary_file/2010/documentation/1_year/user_tools/SF_All_Macro.sas"""
         logger.debug("STUBS: \n%s" % pprint.pformat(stubs))
 
-        return { 'stubs': stubs, 'docs': tech_doc, 'macro': macro_url }
+        return { 'stubs': stubs, 'docs': docs, 'macro': macros }
 
     def files_to_download(self, year, dur, states):
         # Get the year/dur URL on the server
@@ -539,6 +563,15 @@ class AcsServer(object):
                     
         return files
 
+
+
+####################################################
+####################################################
+#
+#                       LOCAL
+#
+####################################################
+####################################################
 class Local(object):
     """ Object representing local environment """
     def __init__(self, outdir, pums=False, overwrite=False):
@@ -594,13 +627,13 @@ class Local(object):
         return {'yd_path': yd_path, 'state_filename': state_filename, 'geo_path': geo_path,
                 'zip_path': zip_path}
 
-    def download_files(self, files, year, dur):
+    def download_data_files(self, files, year, dur):
         """ Download all the files in a file list. """
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             for f in files:
                 logger.debug("Trying to download {0}".format(f))
-                url = "{url}{file}".format(url=f['url'], file=f['file'])
-                __, filename = os.path.split(f['file'])
+                #url = "{url}{file}".format(url=f['url'], file=f['file'])
+                __, filename = os.path.split(f['url'])
                 fname, ext = os.path.splitext(filename)
                 if ext.upper() == ".ZIP":
                     if fname.find("Not_Tracts_Block_Groups") >= 0:
@@ -609,9 +642,9 @@ class Local(object):
                         subdir = 'tracts'
                     else:
                         subdir = None
-                    path = self.destination_paths(year, dur, f['state'], subdir)['zip_path']
+                    path = self.destination_paths(year, dur, f.get('state'), subdir)['zip_path']
                 else:
-                    path = self.destination_paths(year, dur, f['state'])['geo_path']
+                    path = self.destination_paths(year, dur, f.get('state'))['geo_path']
                     # gets the filepath on the local system, where we download to
 
                 if self.overwrite or not os.path.exists(path):
@@ -622,6 +655,11 @@ class Local(object):
                     future.add_done_callback(self.download_callback)
                 else:
                     logger.debug("NOT downloading: %s (already exists)" % path)
+
+    def download_stubs_and_docs(self, files, year, dur):
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            for d in files.get('docs'):
+                path = self.year_dur_destination(year, dur)
 
     def download_callback(self, future):
         '''This method is called after a file is finished downloading.
@@ -1012,7 +1050,8 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
     # years = range(startyear, endyear+1)
     # durations = (str(dur) for dur in durs)
     #chromalog.basicConfig(format="%(levelname)s: %(funcName)s:%(lineno)d -- ")
-    log_format = "%(levelname)-10s:%(funcName)16s:%(lineno)-5d -- %(message)s"
+    #log_format = "%(levelname)-10s:%(funcName)16s:%(lineno)-5d -- %(message)s"
+    log_format = "%(levelname)s:%(lineno)-5d: %(message)s"
     if log is not None:
         chromalog.basicConfig(filename=log, filemode='w', format=log_format)
     else:
@@ -1089,12 +1128,19 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir, dryrun):
             logger.info(Fore.GREEN + Style.BRIGHT + "{0} {1}-year: {2}".format(year, dur, new_states) + Fore.RESET + Style.RESET_ALL)
             #logger.debug("New States: {0}".format(new_states))
 
-            remote_files = acs.files_to_download(year, dur, new_states)
-            logger.debug(pprint.pformat(remote_files))
+            state_data_files = acs.state_data_files(year, dur, new_states)
+            logger.debug("Data files to download: \n{0}{1}{2}".format(Fore.MAGENTA, pprint.pformat([str(f['url']).replace(acs.urlroot, "") for f in state_data_files]), Fore.RESET))
+
+            stubs_and_doc_files = acs.stubs_and_documentation(year, dur)
+
+            logger.debug("Documentation files to download: \n{0}{1}{2}".format(Fore.GREEN, pprint.pformat(stubs_and_doc_files), Fore.RESET))
+            #remote_files = acs.files_to_download(year, dur, new_states)
+            #logger.debug(pprint.pformat(remote_files))
             #logger.debug("Files to download: \n{0}{1}{2}".format(Fore.MAGENTA, pprint.pformat([str(f['url'] + f['file']).replace(acs.urlroot, "") for f in [filesets for filesets in remote_files]]), Fore.RESET))
 
             if not dryrun:
-                local.download_files(remote_files, year, dur)
+                local.download_data_files(state_data_files, year, dur)
+                local.download_doc_files(stubs_and_doc_files, year, dur)
             #logger.info("%s\n%s" % (success("Files:"), pprint.pformat(remote_files)))
             # Get file list based on PUMS/SF and year
 
