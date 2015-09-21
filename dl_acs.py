@@ -307,7 +307,7 @@ class AcsServer(object):
         # Stubs file
         old_stub_re = re.compile(r'merge_5_6.*')
         new_stub_re = re.compile(r'Sequence_?Number_?Table_?Number_?Lookup.*')
-        dur_stub_re = re.compile(r'ACS_' + re.escape(dur) + r'yr_Seq_Table_Number_Lookup.*')
+        dur_stub_re = re.compile(r'ACS_' + re.escape(str(dur)) + r'yr_Seq_Table_Number_Lookup.*')
         logger.debug(pprint.pformat(get_links(doc_url)))
 
         # Filter for old and new stub files
@@ -331,7 +331,30 @@ class AcsServer(object):
         elif year <= 2012:
             stubs = get_links(doc_url + "user_tools/", link_filter=match_old_or_new)
 
+
+        if year<=2006:
+            macro_url = None
+        elif year==2007 and dur==3:
+            macro_url = "http://www2.census.gov/programs-surveys/acs/summary_file/2007/documentation/3_year/Sample SAS Programs/summary_file_example_macros.sas"
+        elif year <= 2008:
+            macro_url = doc_url + "0SASExamplePrograms/summary_file_example_macros.sas"
+        elif year==2009 and dur==3:
+            macro_url = "http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/3_year/user_tools/SF_ALL_Macro.sas"
+        else:
+            macro_url = doc_url + "user_tools/SF_All_Macro.sas"
+
+"""
+            http://www2.census.gov/programs-surveys/acs/summary_file/2007/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
+           
+            http://www2.census.gov/programs-surveys/acs/summary_file/2008/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
+            http://www2.census.gov/programs-surveys/acs/summary_file/2008/documentation/3_year/0SASExamplePrograms/summary_file_example_macros.sas
+            http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/1_year/user_tools/SF_All_Macro.sas
+            http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/3_year/user_tools/SF_ALL_Macro.sas
+            http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/5_year/user_tools/SF_All_Macro.sas
+            http://www2.census.gov/programs-surveys/acs/summary_file/2010/documentation/1_year/user_tools/SF_All_Macro.sas"""
         logger.debug("STUBS: \n%s" % pprint.pformat(stubs))
+
+        return { 'stubs': stubs, 'docs': tech_doc, 'macro': macro_url }
 
     def files_to_download(self, year, dur, states):
         # Get the year/dur URL on the server
@@ -339,7 +362,8 @@ class AcsServer(object):
         stubs_and_docs = self.stubs_and_documentation(year, dur)
         return { 'data': datafiles,
                 'stubs': stubs_and_docs['stubs'],
-                'docs': stubs_and_docs['docs'] }
+                'docs': stubs_and_docs['docs'],
+                'macro': stubs_and_docs['macro'] }
         # yd_url = self.year_dur_url(year, dur)
 
         # if self.pums:
