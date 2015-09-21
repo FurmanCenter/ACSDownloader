@@ -299,10 +299,16 @@ class AcsServer(object):
     def stubs_and_documentation(self, year, dur):
         doc_url = self.rooturls[year][dur]['documentation']
 
+
         # Technical documentation PDF file
         tech_doc_re = re.compile(r'(.*_SF_Tech_Doc\.pdf)')
-        tech_doc = get_links(doc_url, link_filter = partial(re_filter, compiled_re = tech_doc_re) )
+        def _tech_filter(href):
+            if tech_doc_re.search(href):
+                return href
+
+        tech_doc = get_links(doc_url, link_filter = _tech_filter  )
         logger.debug("Tech doc: %s" % tech_doc)
+        docs = [{ 'url': doc_url, 'file': tdoc } for tdoc in tech_doc]
 
         # Stubs file
         old_stub_re = re.compile(r'merge_5_6.*')
@@ -311,27 +317,36 @@ class AcsServer(object):
         logger.debug(pprint.pformat(get_links(doc_url)))
 
         # Filter for old and new stub files
-        def match_old_or_new(url):
-            old = old_stub_re.search(url)
-            if old:
-                return old
-            new = new_stub_re.search(url)
-            if new:
-                return new
-            return dur_stub_re.search(url)
+        def _match_old_or_new(url):
+            if old_stub_re.search(url) or new_stub_re.search(url) or dur_stub_re.search(url):
+                return url
+            else:
+                return None
+            # old = old_stub_re.search(url)
+            # if old:
+            #     return old
+            # new = new_stub_re.search(url)
+            # if new:
+            #     return new
+            # return dur_stub_re.search(url)
 
         if year==2005:
             # 2005 stubs were not moved to new server
-            stubs = ["http://www2.census.gov/acs2005/Chapter_6_acs_2005_tables_Sum_file_shells.xls"]
+            stubs = [{ 'url': "http://www2.census.gov/acs2005/",
+                        'file': "Chapter_6_acs_2005_tables_Sum_file_shells.xls" }]
         elif year == 2006:
-            stubs = ["http://www2.census.gov/acs2006/merge_5_6_final.txt",
-                      "http://www2.census.gov/acs2006/merge_5_6_final.xls"] 
+            stubs = [{ 'url': "http://www2.census.gov/acs2006/",
+                        'file': "merge_5_6_final.txt" },
+                    { 'url': "http://www2.census.gov/acs2006/",
+                    'file': "merge_5_6_final.xls" }] 
         elif year == 2007 or year >= 2013:
-            stubs = get_links(doc_url, link_filter=match_old_or_new)
+            stub_files = get_links(doc_url, link_filter=_match_old_or_new)
+            stubs = [{ 'url': doc_url, 'file': f } for f in stub_files]
         elif year <= 2012:
-            stubs = get_links(doc_url + "user_tools/", link_filter=match_old_or_new)
+            stub_files = get_links(doc_url + "user_tools/", link_filter=_match_old_or_new)
+            stubs = [{ 'url': doc_url + "user_tools/", 'file': f } for f in stub_files]
 
-
+        # Example Macros
         if year<=2006:
             macro_url = None
         elif year==2007 and dur==3:
@@ -343,15 +358,16 @@ class AcsServer(object):
         else:
             macro_url = doc_url + "user_tools/SF_All_Macro.sas"
 
-"""
-            http://www2.census.gov/programs-surveys/acs/summary_file/2007/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
-           
-            http://www2.census.gov/programs-surveys/acs/summary_file/2008/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
-            http://www2.census.gov/programs-surveys/acs/summary_file/2008/documentation/3_year/0SASExamplePrograms/summary_file_example_macros.sas
-            http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/1_year/user_tools/SF_All_Macro.sas
-            http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/3_year/user_tools/SF_ALL_Macro.sas
-            http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/5_year/user_tools/SF_All_Macro.sas
-            http://www2.census.gov/programs-surveys/acs/summary_file/2010/documentation/1_year/user_tools/SF_All_Macro.sas"""
+
+        # """
+        #             http://www2.census.gov/programs-surveys/acs/summary_file/2007/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
+                   
+        #             http://www2.census.gov/programs-surveys/acs/summary_file/2008/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
+        #             http://www2.census.gov/programs-surveys/acs/summary_file/2008/documentation/3_year/0SASExamplePrograms/summary_file_example_macros.sas
+        #             http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/1_year/user_tools/SF_All_Macro.sas
+        #             http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/3_year/user_tools/SF_ALL_Macro.sas
+        #             http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/5_year/user_tools/SF_All_Macro.sas
+        #             http://www2.census.gov/programs-surveys/acs/summary_file/2010/documentation/1_year/user_tools/SF_All_Macro.sas"""
         logger.debug("STUBS: \n%s" % pprint.pformat(stubs))
 
         return { 'stubs': stubs, 'docs': tech_doc, 'macro': macro_url }
@@ -443,8 +459,10 @@ class AcsServer(object):
         files = []
                         
         for st in states:
-            files.append({'url': url, 'file': 'unix_h%s.zip' % st, 'state': st})
-            files.append({'url': url, 'file': 'unix_p%s.zip' % st, 'state': st})                 
+            #files.append({'url': url, 'file': 'unix_h%s.zip' % st, 'state': st})
+            #files.append({'url': url, 'file': 'unix_p%s.zip' % st, 'state': st})                 
+            files.append({'url': url + 'unix_h%s.zip' % st, 'state': st})
+            files.append({'url': url + 'unix_p%s.zip' % st, 'state': st})      
         return files
 
     def old_sf_files(self, year, dur, states):
@@ -489,8 +507,11 @@ class AcsServer(object):
                 logger.warning("NO FILE for: {0} {1}".format(st, st_dir))
                 continue
             
-            files.append({'url': st_dir + '/', 'file': st_file, 'state': st})
-            files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
+            #files.append({'url': st_dir + '/', 'file': st_file, 'state': st})
+            #files.append({'url': st_dir + '/', 'file': geo_file, 'state': st})
+            files.append({'url': st_dir + '/' + st_file, 'state': st })
+            files.append({'url': st_dir + '/' + geo_file, 'state': st })
+            
         return files
         
     def new_sf_files(self, year, dur, states):
@@ -513,7 +534,8 @@ class AcsServer(object):
             for link in st_links:
                 # look for the state name in any ZIP file
                 if re.search(r'{0}.*\.zip'.format(state_filestub(st)), link):
-                    files.append({'url': st_dir, 'file': link, 'state': st})
+                    #files.append({'url': st_dir, 'file': link, 'state': st})
+                    files.append({ 'url': st_dir + link, 'state': st })
                     
         return files
 
@@ -1068,7 +1090,8 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir, dryrun):
             #logger.debug("New States: {0}".format(new_states))
 
             remote_files = acs.files_to_download(year, dur, new_states)
-            logger.debug("Files to download: \n{0}{1}{2}".format(Fore.MAGENTA, pprint.pformat([str(f['url'] + f['file']).replace(acs.urlroot, "") for f in remote_files]), Fore.RESET))
+            logger.debug(pprint.pformat(remote_files))
+            #logger.debug("Files to download: \n{0}{1}{2}".format(Fore.MAGENTA, pprint.pformat([str(f['url'] + f['file']).replace(acs.urlroot, "") for f in [filesets for filesets in remote_files]]), Fore.RESET))
 
             if not dryrun:
                 local.download_files(remote_files, year, dur)
