@@ -3,11 +3,13 @@ import requests
 from bs4 import BeautifulSoup as bs
 import click
 import re
+import shutil
 import us
 import logging
 import pprint
 from colorama import Fore, Back, Style
 from functools import partial
+import zipfile
 #from colorama import init as colorama_init
 #from termcolor import colored
 
@@ -57,7 +59,8 @@ def download(url, path, chunk_size=1024*1024):
         return {'success': False, 'status': r.status_code, 'url': url, 'path': path}
     with open(path, 'wb') as f:
         total_length = int(r.headers.get('content-length'))
-        with click.progressbar(r.iter_content(chunk_size=chunk_size), label="Downloading {0}\n".format(os.path.split(r.url)[1])) as bar:
+
+        with click.progressbar(r.iter_content(chunk_size=chunk_size), label="Downloading {0}".format(os.path.split(r.url)[1])) as bar:
             for chunk in bar:
                 if chunk:
                     f.write(chunk)
@@ -325,13 +328,13 @@ class AcsServer(object):
 
         tech_doc = get_links(doc_url, link_filter = _tech_filter  )
         logger.debug("Tech doc: %s" % tech_doc)
-        docs = [{ 'url': doc_url, 'file': tdoc } for tdoc in tech_doc]
+        docs = [{ 'url': doc_url + tdoc, 'file': tdoc } for tdoc in tech_doc]
 
         # Stubs file
         old_stub_re = re.compile(r'merge_5_6.*')
         new_stub_re = re.compile(r'Sequence_?Number_?Table_?Number_?Lookup.*')
         dur_stub_re = re.compile(r'ACS_' + re.escape(str(dur)) + r'yr_Seq_Table_Number_Lookup.*')
-        logger.debug(pprint.pformat(get_links(doc_url)))
+        #logger.debug(pprint.pformat(get_links(doc_url)))
 
         # Filter for old and new stub files
         def _match_old_or_new(url):
@@ -358,7 +361,7 @@ class AcsServer(object):
             #             'file': "merge_5_6_final.txt" },
             #         { 'url': "http://www2.census.gov/acs2006/",
             #         'file': "merge_5_6_final.xls" }] 
-        elif year == 2007 or year >= 2013:
+        elif year == 2007:
             stub_files = get_links(doc_url, link_filter=_match_old_or_new)
             stub_urls = [doc_url + f for f in stub_files]
             #tubs = [{ 'url': doc_url, 'file': f } for f in stub_files]
@@ -366,6 +369,9 @@ class AcsServer(object):
             stub_files = get_links(doc_url + "user_tools/", link_filter=_match_old_or_new)
             stub_urls = [doc_url + "user_tools/" + f for f in stub_files]
             #stubs = [{ 'url': doc_url + "user_tools/", 'file': f } for f in stub_files]
+        elif year >= 2013:
+            stub_files = get_links(doc_url + "user_tools/", link_filter=_match_old_or_new)
+            stub_urls = [doc_url + "user_tools/" + f for f in stub_files]
 
         stubs = [{ 'url': u } for u in stub_urls ]
 
@@ -378,8 +384,12 @@ class AcsServer(object):
             macro_url = doc_url + "0SASExamplePrograms/summary_file_example_macros.sas"
         elif year==2009 and dur==3:
             macro_url = "http://www2.census.gov/programs-surveys/acs/summary_file/2009/documentation/3_year/user_tools/SF_ALL_Macro.sas"
-        else:
+        elif year <= 2012:
             macro_url = doc_url + "user_tools/SF_All_Macro.sas"
+        elif year == 2013:
+            macro_url = doc_url + "user_tools/SummaryFile_All_Macro.sas"
+        elif year == 2014:
+            macro_url = doc_url + "user_tools/SF_All_Macro_1YR.sas"
 
         macros = [{ 'url': macro_url }]
 
@@ -394,7 +404,7 @@ class AcsServer(object):
         #             http://www2.census.gov/programs-surveys/acs/summary_file/2010/documentation/1_year/user_tools/SF_All_Macro.sas"""
         logger.debug("STUBS: \n%s" % pprint.pformat(stubs))
 
-        return { 'stubs': stubs, 'docs': docs, 'macro': macros }
+        return { 'stubs': stubs, 'docs': docs, 'macros': macros }
 
     def files_to_download(self, year, dur, states):
         # Get the year/dur URL on the server
@@ -594,21 +604,35 @@ class Local(object):
         yd_path = "{0}ACS{1}_{2}yr".format(self.outdir, year, dur)
 
         safe_make_dir(yd_path)
+        logger.debug("YEAR/DUR destination {}: {}".format(self.pums, yd_path))
         if self.pums:
-            safe_make_dir(yd_path + '/raw/zip')
-            safe_make_dir(yd_path + '/clean')
+            safe_make_dir(os.path.join(yd_path, 'raw', 'zip'))
+            safe_make_dir(os.path.join(yd_path,'clean'))
         else:
-            if dur == 5:
+            # Create raw file, and subdirectories if it's 5 year
+            if int(dur) == 5:
                 for subdir in ("tracts", "nontracts"):
-                    safe_make_dir("{0}/{1}/raw/zip".format(yd_path, subdir))
-                    safe_make_dir("{0}/{1}/stubs".format(yd_path, subdir))
-                    safe_make_dir("{0}/{1}/docs".format(yd_path, subdir))
-                    safe_make_dir("{0}/{1}/code".format(yd_path, subdir))
+                    safe_make_dir(os.path.join(yd_path, 'raw', subdir, 'zip'))
             else:
-                safe_make_dir(yd_path + '/raw/zip') # this is recursive, so it will create /raw and then /raw/zip
-                safe_make_dir(yd_path + '/stubs')
-                safe_make_dir(yd_path + '/docs')
-                safe_make_dir(yd_path + '/code')
+                safe_make_dir(os.path.join(yd_path, 'raw', 'zip'))
+
+            logger.debug("Making directories %s" % yd_path)
+            safe_make_dir(os.path.join(yd_path, 'stubs')) #yd_path + '/stubs')
+            safe_make_dir(os.path.join(yd_path, 'docs')) #yd_path + '/docs')
+            safe_make_dir(os.path.join(yd_path, 'code')) #yd_path + '/code')
+            assert os.path.isdir(os.path.join(yd_path, 'code'))
+
+            # if dur == 5:
+            #     for subdir in ("tracts", "nontracts"):
+            #         safe_make_dir(os.path.join(yd_path, 'raw', subdir, 'zip')) #"{0}/raw/{1}/zip".format(yd_path, subdir))
+            #     safe_make_dir(os.path.join(yd_path, 'stubs')) #"{0}/stubs".format(yd_path))
+            #     safe_make_dir(os.path.join(yd_path, 'docs')) #"{0}/docs".format(yd_path))
+            #     safe_make_dir(os.path.join(yd_path, 'code')) #"{0}/code".format(yd_path))
+            # else:
+            #     safe_make_dir(os.path.join(yd_path, 'raw', 'zip')) #yd_path + '/raw/zip') # this is recursive, so it will create /raw and then /raw/zip
+            #     safe_make_dir(os.path.join(yd_path, 'stubs')) #yd_path + '/stubs')
+            #     safe_make_dir(os.path.join(yd_path, 'docs')) #yd_path + '/docs')
+            #     safe_make_dir(os.path.join(yd_path, 'code')) #yd_path + '/code')
 
         return yd_path
 
@@ -619,47 +643,74 @@ class Local(object):
         geo_filename = "g" + str(year) + str(dur) + str(state) + ".txt"
 
         if subdir is None:
-            geo_path = '%s/raw/%s' % (yd_path, geo_filename)
-            zip_path = '%s/raw/zip/%s' % (yd_path, state_filename)
+            geo_path = os.path.join(yd_path, 'raw', geo_filename) #'%s/raw/%s' % (yd_path, geo_filename)
+            zip_path = os.path.join(yd_path, 'raw', 'zip', state_filename) #'%s/raw/zip/%s' % (yd_path, state_filename)
         else:
-            geo_path = '%s/%s/raw/%s' % (yd_path, subdir, geo_filename)
-            zip_path = '%s/%s/raw/zip/%s' % (yd_path, subdir, state_filename)
+            geo_path = os.path.join(yd_path, 'raw', subdir, geo_filename) #'%s/raw/%s/%s' % (yd_path, subdir, geo_filename)
+            zip_path = os.path.join(yd_path, 'raw', subdir, 'zip', state_filename) #'%s/raw/%s/zip/%s' % (yd_path, subdir, state_filename)
         return {'yd_path': yd_path, 'state_filename': state_filename, 'geo_path': geo_path,
                 'zip_path': zip_path}
 
     def download_data_files(self, files, year, dur):
         """ Download all the files in a file list. """
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             for f in files:
                 logger.debug("Trying to download {0}".format(f))
                 #url = "{url}{file}".format(url=f['url'], file=f['file'])
                 __, filename = os.path.split(f['url'])
                 fname, ext = os.path.splitext(filename)
+                if fname.find("Not_Tracts_Block_Groups") >= 0:
+                    subdir = 'nontracts'
+                elif fname.find("Tracts_Block_Groups_Only") >= 0:
+                    subdir = 'tracts'
+                else:
+                    subdir = None
+
+                logger.debug("Filename: {}".format(filename))
+                logger.debug("Fname: {}".format(fname))
+                logger.debug("ext: {}; upper: {}; == {}".format(ext, ext.upper(), (ext.upper()==".ZIP")))
+                logger.debug("subdir: {}".format(subdir))
+                # If zip file, use zip path; otherwise, it's the geo file
+
+                dest_path = self.destination_paths(year, dur, f.get('state'), subdir)
+                logger.debug(dest_path)
                 if ext.upper() == ".ZIP":
-                    if fname.find("Not_Tracts_Block_Groups") >= 0:
-                        subdir = 'nontracts'
-                    elif fname.find("Tracts_Block_Groups_Only") >= 0:
-                        subdir = 'tracts'
-                    else:
-                        subdir = None
                     path = self.destination_paths(year, dur, f.get('state'), subdir)['zip_path']
                 else:
-                    path = self.destination_paths(year, dur, f.get('state'))['geo_path']
+                    path = self.destination_paths(year, dur, f.get('state'), subdir)['geo_path']
                     # gets the filepath on the local system, where we download to
 
                 if self.overwrite or not os.path.exists(path):
                     # If file does not already exist, then download it
-                    logger.info("Downloading <{url}> to [{path}]".format(url=url, path=path))
+                    logger.info("Downloading <{url}> to [{path}]".format(url=f['url'], path=path))
                     #sys.stdout.flush()
-                    future = executor.submit(download, url, path)
+                    future = executor.submit(download, f['url'], path)
                     future.add_done_callback(self.download_callback)
                 else:
                     logger.debug("NOT downloading: %s (already exists)" % path)
 
     def download_stubs_and_docs(self, files, year, dur):
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        #with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        logger.debug("Dowloading docs: {}".format(files))
+        if files.get('docs'):
             for d in files.get('docs'):
-                path = self.year_dur_destination(year, dur)
+                __, fname = os.path.split(d['url'])
+                path = os.path.join(self.year_dur_destination(year, dur), 'docs', fname)
+
+                download(d['url'], path)
+
+        if files.get('stubs'):
+            for s in files.get('stubs'):
+                __, fname = os.path.split(s['url'])
+                path = os.path.join(self.year_dur_destination(year, dur), 'stubs', fname)
+                download(s['url'], path)
+
+        if files.get('macros'):
+            for m in files.get('macros'):
+                __, fname = os.path.split(m['url'])
+                path = os.path.join(self.year_dur_destination(year, dur), 'code', fname)
+                download(m['url'], path)
+
 
     def download_callback(self, future):
         '''This method is called after a file is finished downloading.
@@ -673,9 +724,11 @@ class Local(object):
             __, ext = os.path.splitext(path)
             root = os.path.split(path)[0]
             final_root = os.path.split(root)[0]
+            # If a zip file, extract it
             if ext.upper() == ".ZIP":
-                future = self.dl_executor.submit(self.extract_file, path, root, final_root)
-                future.add_done_callback(self.extract_callback)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as dl_executor:
+                    future = dl_executor.submit(self.extract_file, path=path, into=root, final_into=final_root)
+                    future.add_done_callback(self.extract_callback)
 
     def extract_callback(self, future):
         '''This method is called after a file has been extracted.'''
@@ -688,9 +741,9 @@ class Local(object):
             print "ORIGINAL: %s DIR: %s INTO: %s FINAL_INTO: %s" % (r['original'], r['dirs'][0], r['into'], r['final_into'])
             # Move files into root directory
             for i, f in enumerate(r['files']):
-                src = "%s/%s" % (r['into'], f)
+                src = os.path.join(r['into'], f) #"%s/%s" % (r['into'], f)
                 src_name = os.path.split(src)[1] # get file name
-                dst = "%s/%s" % (r['final_into'], src_name)
+                dst = os.path.join(r['final_into'], src_name) #"%s/%s" % (r['final_into'], src_name)
                 '''NOTE: in certain years, the geo files are repeated in each
                 sub-zip, but each one overwrites the previous one. Thus, there
                 is only one copy in the /raw/zip/ folder at the end. Then, after the
@@ -706,28 +759,30 @@ class Local(object):
     def extract_file(self, path, into, final_into=None):
         """Extracts file at path to folder into. If final_into
         is specified, then the final files (after recursively unzipping
-        everything) are moved into final_into."""
+        everything) are moved into final_into (this is done in the callback)."""
         
         print "EXTRACTING PATH:", path
         with zipfile.ZipFile(path, 'r') as z:
             # Extract all to d.root...
             z.extractall(into)
             # Then check to see if the files extracted contained more zip files!
-            drc = ''
+            #drc = ''
 
             extracted_files = []
             dirs = []
-            for n in z.namelist():
+            #print z.namelist()
+            # For each extracted file
+            for name in z.namelist():
                 # Move file into root directory
-                drc, fname = os.path.split(n)
+                drc, fname = os.path.split(name)
                 __, ext = os.path.splitext(fname)
-                print fname, ext.upper()
+                #print fname, ext.upper()
                 if ext.upper() == ".ZIP":
-                    res = self.extract_file("%s/%s" % (into, n), into)
+                    res = self.extract_file(os.path.join(into, name), into) #"%s/%s" % (into, name), into)
                     extracted_files.extend(res['files'])
                     dirs.extend(res['dirs'])
                 else:
-                    extracted_files.extend([n])
+                    extracted_files.extend([name])
                     dirs.extend([drc])
             result = {'original': path, 'files': extracted_files, 'dirs': dirs, 'into': into, 'final_into': final_into}
             return result
@@ -1102,7 +1157,7 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir, dryrun):
     logger.debug("Durations: {0}".format(durations))
 
     acs = AcsServer(baseurl=baseurl, years=years, durs=durations, pums=False)
-    local = Local(outdir, pums, overwrite)
+    local = Local(outdir, overwrite=overwrite, pums=False)
 
     # Get list of files to download
     # Get list of data files
@@ -1140,7 +1195,7 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir, dryrun):
 
             if not dryrun:
                 local.download_data_files(state_data_files, year, dur)
-                local.download_doc_files(stubs_and_doc_files, year, dur)
+                local.download_stubs_and_docs(stubs_and_doc_files, year, dur)
             #logger.info("%s\n%s" % (success("Files:"), pprint.pformat(remote_files)))
             # Get file list based on PUMS/SF and year
 
@@ -1167,7 +1222,7 @@ def sf(states, baseurl, startyear, endyear, durs, overwrite, outdir, dryrun):
     #get_files_new_SF(url, year, dur, states)
 
 
-@dl_acs.command()
-def pums():
-    """Download Public Use Microdata Sample datafiles"""
-    click.echo("Downloading PUMS")
+# @dl_acs.command()
+# def pums():
+#     """Download Public Use Microdata Sample datafiles"""
+#     click.echo("Downloading PUMS")
