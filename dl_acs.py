@@ -391,7 +391,9 @@ class AcsServer(object):
         elif year == 2014:
             macro_url = doc_url + "user_tools/SF_All_Macro_1YR.sas"
 
-        macros = [{ 'url': macro_url }]
+        macros = None
+        if macro_url:
+            macros = [{ 'url': macro_url }]
 
         # """
         #             http://www2.census.gov/programs-surveys/acs/summary_file/2007/documentation/1_year/0SASExamplePrograms/summary_file_example_macros.sas
@@ -707,6 +709,7 @@ class Local(object):
 
         if files.get('macros'):
             for m in files.get('macros'):
+                logger.debug("MACROS: %s" % m)
                 __, fname = os.path.split(m['url'])
                 path = os.path.join(self.year_dur_destination(year, dur), 'code', fname)
                 download(m['url'], path)
@@ -1107,10 +1110,13 @@ def dl_acs(debug, verbose, log): #, baseurl, startyear, endyear, durs, states, d
     #chromalog.basicConfig(format="%(levelname)s: %(funcName)s:%(lineno)d -- ")
     #log_format = "%(levelname)-10s:%(funcName)16s:%(lineno)-5d -- %(message)s"
     log_format = "%(levelname)s:%(lineno)-5d: %(message)s"
+    
     if log is not None:
-        chromalog.basicConfig(filename=log, filemode='w', format=log_format)
+        #chromalog.basicConfig(filename=log, filemode='w', format=log_format)
+        logging.basicConfig(filename=log, filemode='w', format=log_format)
     else:
-        chromalog.basicConfig(format=log_format)
+        #chromalog.
+        logging.basicConfig(format=log_format)
 
     
 
