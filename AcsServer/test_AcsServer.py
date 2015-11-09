@@ -65,9 +65,16 @@ def test_SF_state_data_files_2009_13_5yr():
 			u'http://www2.census.gov/programs-surveys/acs/summary_file/2013/data/5_year_by_state/NewYork_Tracts_Block_Groups_Only.zip', 
 			'state': 'ny'}])
 
+def test_SF_stubs_and_doc_files():
+	server = AcsServer(years=[2009, 2013], durs=[1, 5], pums=False)
+	print server.stubs_and_documentation(2009, 1)
+	print server.stubs_and_documentation(2009, 5)
+
 def test_PUMS_state_data_files():
 	server = AcsServer(years=[2009, 2013], durs=[1, 5], pums=True)
 	print server.state_data_files(2009, 1, ['ny', 'us'])
+
+
 
 
 def test_pass():
