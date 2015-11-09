@@ -1,6 +1,7 @@
 import os
 import requests
 import logging
+import click
 
 def safe_make_dir(newdir):
     '''Try making new directory, do not throw error if already exists'''
@@ -31,6 +32,7 @@ def download(url, path, chunk_size=1024*1024):
     if r.status_code != requests.codes.ok:
         logging.error("Got status %s from %s" % (r.status_code, url))
         return {'success': False, 'status': r.status_code, 'url': url, 'path': path}
+
     with open(path, 'wb') as f:
         total_length = int(r.headers.get('content-length'))
 
