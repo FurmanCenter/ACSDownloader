@@ -216,3 +216,4 @@ pip-log.txt
 .mr.developer.cfg
 *.ipynb
 *.sublime-workspace
+dl_acs_ny_log.txt
