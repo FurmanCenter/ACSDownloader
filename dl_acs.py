@@ -1,8 +1,5 @@
 import os
-import requests
-from bs4 import BeautifulSoup as bs
 import click
-import re
 import shutil
 import us
 import logging

@@ -2,8 +2,13 @@
 ACS Downloader Utilities
 """
 
+import requests
+import re
+from bs4 import BeautifulSoup as bs
+import us
+
 def safe_make_dir(newdir):
-	'''Try making new directory, do not throw error if already exists'''
+    '''Try making new directory, do not throw error if already exists'''
     try:
         os.makedirs(newdir)
     except OSError as e:
@@ -59,7 +64,8 @@ def get_links(url, link_filter=None):
             a list of the links themselves, as strings. If a filter is provided,
             a list of the output from the filter.
 
-    >>> get_links('http://www2.census.gov/acs2005/summaryfile/', filter=lambda h: h if not h.find('/') >= 0 else None)
+    >>> get_links('http://www2.census.gov/acs2005/summaryfile/',
+    ... link_filter=lambda h: h if not h.find('/') >= 0 else None)
     [u'ACS_2005_SF_Tech_Doc.pdf', u'ACS_SF_Worked_Example.pdf', u'README.pdf']
 
     >>> len(get_links('http://www2.census.gov/acs2005/summaryfile/'))
@@ -81,7 +87,7 @@ def get_links(url, link_filter=None):
 
 
 def re_filter(href, compiled_re):
-	'''A function for filtering links by a regex'''
+    '''Filter links by whether they match regex'''
     return compiled_re.search(href)
 
 def acs_year_dur_filter(href, years=None, durs=None):
@@ -101,19 +107,11 @@ def acs_year_dur_filter(href, years=None, durs=None):
     >>> print acs_year_dur_filter('Alaska/')
     None
 
-    >>> acs_year_dur_filter('/acs2005/') == {
-    ...     'dir': 'acs2005', 
-    ...     'dur': None, 
-    ...      'href': '/acs2005',
-    ...      'year': '2005'}
-    True
+    >>> print acs_year_dur_filter('/acs2005/')
+    {'dur': 1, 'href': '/acs2005', 'dir': 'acs2005', 'year': 2005}
 
-    >>> acs_year_dur_filter('http://www2.census.gov/acs2009_5yr/') == {
-    ...    'dir': '/acs2009_5yr', 
-    ...    'dur': '5', 
-    ...    'href': 'http://www2.census.gov/acs2009_5yr', 
-    ...    'year': '2009'}
-    True
+    >>> print acs_year_dur_filter('http://www2.census.gov/acs2009_5yr/')
+    {'dur': 5, 'href': 'http://www2.census.gov/acs2009_5yr', 'dir': 'acs2009_5yr', 'year': 2009}
 
     >>> print acs_year_dur_filter('http://www2.census.gov/acs2009_5yr/', years=[2009], durs=[3])
     None
@@ -151,7 +149,9 @@ def acs_year_dur_filter(href, years=None, durs=None):
     else:
         return None
 
+
 def valid_url(url):
+    '''Test if URL is valid (successful return code)'''
     r = requests.get(url)
     return (r.status_code == requests.codes.ok)
 
@@ -162,6 +162,15 @@ def state_filestub(st, is2005=False):
     The Census standard is the full state name, camel case, spaces
     removed. This generally is true for "United States" too, but in 2005
     they put a "0" in front of the name, to make sure it's sorted to the top.
+
+    >>> print state_filestub("NY")
+    NewYork
+    
+    >>> print state_filestub("US")
+    UnitedStates
+
+    >>> print state_filestub("us", is2005=True)
+    0UnitedStates
     """
     state = us.states.lookup(st)
     if state is None:
