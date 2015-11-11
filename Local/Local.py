@@ -2,6 +2,7 @@ import os
 import logging
 import zipfile
 import concurrent.futures
+import shutil
 from local_utils import safe_make_dir, download
 
 logger = logging.getLogger(__name__)
@@ -27,10 +28,12 @@ class Local(object):
 
     def year_dur_destination(self, year, dur):
         """ Get year/dur path, and create it and subfolders if it doesn't exist. """
-        yd_path = "{0}ACS{1}_{2}yr".format(self.outdir, year, dur)
+        yd_path = os.path.normpath(
+                    "{0}{3}ACS{1}_{2}yr".format(self.outdir, year, dur, os.path.sep))
 
         safe_make_dir(yd_path)
-        logger.debug("YEAR/DUR destination {}: {}".format(self.pums, yd_path))
+
+        print "YEAR/DUR destination {}: {}".format(self.pums, yd_path)
         if self.pums:
             safe_make_dir(os.path.join(yd_path, 'raw', 'zip'))
             safe_make_dir(os.path.join(yd_path,'clean'))

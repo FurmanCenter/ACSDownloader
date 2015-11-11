@@ -107,10 +107,10 @@ class AcsServer(object):
             logger.error("No valid data URL for {year}, {dur}".format(year=year, dur=dur))
             return []
 
-        data_files = []
+        #data_files = []
 
         if self.pums:
-            pass
+            return self.pums_files(self.rooturls[year][dur]['data'], year, dur, states)
         else:
             if u'Alabama/' in state_urls:
                 # Old SF

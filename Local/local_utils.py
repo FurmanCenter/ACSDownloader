@@ -35,11 +35,15 @@ def download(url, path, chunk_size=1024*1024):
 
     with open(path, 'wb') as f:
         total_length = int(r.headers.get('content-length'))
-
-        with click.progressbar(r.iter_content(chunk_size=chunk_size), label="Downloading {0}".format(os.path.split(r.url)[1])) as bar:
-            for chunk in bar:
-                if chunk:
-                    f.write(chunk)
-                    f.flush()
+        print "Downloading {0}".format(os.path.split(r.url)[1])
+        for chunk in r.iter_content(chunk_size=chunk_size):
+            if chunk:
+                f.write(chunk)
+                f.flush()
+        # with click.progressbar(r.iter_content(chunk_size=chunk_size), label="Downloading {0}".format(os.path.split(r.url)[1])) as bar:
+        #     for chunk in bar:
+        #         if chunk:
+        #             f.write(chunk)
+        #             f.flush()
 
     return {'success': True, 'status': r.status_code, 'url': url, 'path': path}
